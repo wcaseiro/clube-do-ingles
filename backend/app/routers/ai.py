@@ -13,7 +13,8 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 @router.post("/chat", response_model=AIChatResponse)
 def chat(data: AIChatRequest, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     lesson = db.get(Lesson, data.lesson_id) if data.lesson_id else None
-    result = generate_ai_response(data.message, user.first_name, lesson.title if lesson else None)
+    turn_index = db.query(AIConversation).filter(AIConversation.user_id == user.id).count()
+    result = generate_ai_response(data.message, user.first_name, lesson.title if lesson else None, turn_index=turn_index)
     points = add_ai_xp_once_per_day(db, user)
     conv = AIConversation(
         user_id=user.id,

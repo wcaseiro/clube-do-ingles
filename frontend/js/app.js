@@ -2,7 +2,7 @@ const app = document.getElementById('app');
 const nav = document.getElementById('bottomNav');
 window.addEventListener('popstate', render);
 nav.addEventListener('click', e => { const b=e.target.closest('button'); if(b?.dataset.route) go(b.dataset.route); });
-if('serviceWorker' in navigator){ window.addEventListener('load',()=>navigator.serviceWorker.register('/service-worker.js?v=6').catch(()=>{})); }
+if('serviceWorker' in navigator){ window.addEventListener('load',()=>navigator.serviceWorker.register('/service-worker.js?v=7').catch(()=>{})); }
 
 let currentSpeechRecognition = null;
 
@@ -11,14 +11,13 @@ function showNav(show=true){ nav.classList.toggle('hidden', !show); }
 function logo(){ return `<div class="logo"><img src="/assets/logo.svg" alt="Clube do Inglês"></div>`; }
 function card(content, extra=''){ return `<section class="card ${extra}">${content}</section>`; }
 function escapeHtml(s){ return String(s ?? '').replace(/[&<>'"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+function getVoiceRate(){ return localStorage.getItem('voice_rate') === 'slow' ? 0.68 : 0.92; }
+function setVoiceRate(rate){ localStorage.setItem('voice_rate', rate); document.querySelectorAll('[data-rate]').forEach(b => b.classList.toggle('active', b.dataset.rate === rate)); toast(rate === 'slow' ? 'Velocidade lenta ativada.' : 'Velocidade normal ativada.', 'success'); }
 function speak(text, lang='en-US'){
   if(!('speechSynthesis' in window)){ toast('Este navegador não suporta leitura por voz.', 'warn'); return; }
-  speechSynthesis.cancel();
-  const u=new SpeechSynthesisUtterance(text);
-  u.lang=lang;
-  u.rate=.9;
-  speechSynthesis.speak(u);
+  speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(text); u.lang=lang; u.rate=getVoiceRate(); u.pitch=1.08; speechSynthesis.speak(u); animateLumaSpeaking();
 }
+function animateLumaSpeaking(){ document.querySelectorAll('.robot-avatar-img,.big-luma').forEach(el => { el.classList.add('talking'); setTimeout(()=>el.classList.remove('talking'), 1400); }); }
 
 function rewardSound(){
   try{
@@ -54,12 +53,8 @@ function isSecureForMic(){
   return location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
 }
 function micUnavailableMessage(){
-  if(!isSecureForMic()){
-    return 'Para usar o microfone, acesse pelo HTTPS: https://clube-do-ingles.4cloud.tech';
-  }
-  if(!supportsSpeechRecognition()){
-    return 'Reconhecimento de voz não disponível neste navegador. Use Chrome/Android ou Chrome no computador.';
-  }
+  if(!isSecureForMic()) return 'Para usar o microfone, acesse pelo HTTPS: https://clube-do-ingles.4cloud.tech:8083';
+  if(!supportsSpeechRecognition()) return 'Reconhecimento de voz não disponível neste navegador. Use Chrome/Android ou Chrome no computador.';
   return null;
 }
 function startSpeechToInput(inputId, onFinal){
@@ -306,61 +301,16 @@ async function renderProfile(){
 
 async function renderAI(){
   if(!protect()) return; showNav(true);
-  const params = new URLSearchParams(location.search);
-  const lessonId = params.get('lesson') || '';
-  const micWarn = micUnavailableMessage();
-  app.innerHTML = `<div class="topbar"><div class="title"><h1>Conversa com a Luma</h1><p>Modo voz: a Luma fala, você responde, e ela corrige com carinho.</p></div></div>
-  ${card(`<div class="ai-stage voice-first">
-    <div class="luma-hero">
-      <img class="robot-avatar-img big-luma" src="/assets/luma.svg" alt="Luma, robô professora">
-      <div>
-        <span class="badge">🤖 Luma · robô professora</span>
-        <h2>Vamos conversar em inglês?</h2>
-        <p class="translation">Aperte “Iniciar conversa”. A Luma vai falar com você. Depois responda por voz ou escreva.</p>
-      </div>
-    </div>
-    ${micWarn ? `<div class="safe-note">🎙️ ${escapeHtml(micWarn)}</div>` : `<div class="voice-ready">🎙️ Microfone pronto. Use frases curtas em inglês.</div>`}
-    <div class="ai-context">
-      <div class="context-pill">🎯 Cena: você conhece uma amiga em Londres.</div>
-      <div class="context-pill">🗣️ Responda com frases simples.</div>
-      <div class="context-pill">✨ A Luma fala e depois escuta você.</div>
-    </div>
-    <div class="luma-control-panel">
-      <button class="btn luma-start" id="startVoiceLesson">▶️ Iniciar conversa</button>
-      <button class="btn secondary" id="hearLastBtn">🔊 Ouvir Luma de novo</button>
-      <button class="btn secondary" id="voiceAnswerBtn">🎙️ Responder por voz</button>
-    </div>
-    <div id="chat" class="chat voice-chat">
-      <div class="msg ai robot"><div class="msg-head"><img class="robot-mini-img" src="/assets/luma.svg" alt=""><b>Luma</b></div><span id="lastLumaText">Hello, explorer! I’m Luma. What is your name?</span><br><small>Toque em “Iniciar conversa” para me ouvir.</small></div>
-    </div>
-    <div class="chat-input typed-fallback"><input id="chatText" placeholder="Ou escreva sua resposta em inglês..." autocomplete="off"><button class="btn" id="sendChat">Enviar</button></div>
-    <input type="hidden" id="chatLessonId" value="${lessonId}">
-  </div>`)};`;
-  const first = "Hello, explorer! I am Luma. What is your name?";
-  window.lastLumaSpeech = first;
-  document.getElementById('sendChat').onclick = sendChat;
-  document.getElementById('startVoiceLesson').onclick = () => { speak(first); setTimeout(()=>startSpeechToInput('chatText', ()=>sendChat()), 1400); };
-  document.getElementById('hearLastBtn').onclick = () => speak(window.lastLumaSpeech || first);
-  document.getElementById('voiceAnswerBtn').onclick = () => startSpeechToInput('chatText', ()=>sendChat());
-  document.getElementById('chatText').addEventListener('keydown', e=>{ if(e.key==='Enter') sendChat(); });
+  const params = new URLSearchParams(location.search); const lessonId = params.get('lesson') || ''; const micWarn = micUnavailableMessage(); const currentRate = localStorage.getItem('voice_rate') || 'normal';
+  app.innerHTML = `<div class="ai-page"><section class="luma-header"><img class="robot-avatar-img big-luma" src="/assets/luma.svg" alt="Luma, robô professora"><div><span class="badge">🤖 Luma · conversa por voz</span><h1>Fale inglês comigo!</h1><p>Eu faço perguntas curtas, escuto sua resposta e te ajudo a melhorar.</p><div class="speed-toggle"><button class="btn secondary ${currentRate==='normal'?'active':''}" data-rate="normal" onclick="setVoiceRate('normal')">⚡ Normal</button><button class="btn secondary ${currentRate==='slow'?'active':''}" data-rate="slow" onclick="setVoiceRate('slow')">🐢 Mais lento</button></div></div></section>${micWarn ? `<div class="safe-note">🎙️ ${escapeHtml(micWarn)}</div>` : `<div class="voice-ready">🎙️ Microfone pronto. Toque no botão grande para responder.</div>`}<section class="voice-card"><div id="chat" class="chat voice-chat"><div class="msg ai robot"><div class="msg-head"><img class="robot-mini-img" src="/assets/luma.svg" alt=""><b>Luma</b><span class="luma-mood">animada</span></div><span id="lastLumaText">Hello, explorer! I am Luma. What is your name?</span><div class="robot-actions"><button class="btn secondary" onclick="speak(window.lastLumaSpeech)">🔊 Ouvir</button></div></div></div><div class="quick-actions"><button class="btn luma-start" id="startVoiceLesson">▶️ Começar</button><button class="btn secondary" id="hearLastBtn">🔊 Repetir Luma</button></div><div class="chat-input typed-fallback"><input id="chatText" placeholder="Ou escreva sua resposta..." autocomplete="off"><button class="btn" id="sendChat">Enviar</button></div><input type="hidden" id="chatLessonId" value="${lessonId}"></section><button class="floating-mic" id="floatingMic" aria-label="Responder por voz">🎙️<span>Falar</span></button></div>`;
+  const first = "Hello, explorer! I am Luma. What is your name?"; window.lastLumaSpeech = first;
+  document.getElementById('sendChat').onclick = sendChat; document.getElementById('startVoiceLesson').onclick = () => { speak(first); setTimeout(()=>startSpeechToInput('chatText', ()=>sendChat()), 1300); }; document.getElementById('hearLastBtn').onclick = () => speak(window.lastLumaSpeech || first); document.getElementById('floatingMic').onclick = () => startSpeechToInput('chatText', ()=>sendChat()); document.getElementById('chatText').addEventListener('keydown', e=>{ if(e.key==='Enter') sendChat(); });
 }
 
 async function sendChat(){
-  const input=document.getElementById('chatText'); const msg=input.value.trim(); if(!msg) return;
-  const lessonId = document.getElementById('chatLessonId')?.value || null;
-  const chat=document.getElementById('chat'); chat.innerHTML += `<div class="msg me">${escapeHtml(msg)}</div>`; input.value='';
-  const r=await api('/ai/chat',{method:'POST', body:JSON.stringify({lesson_id: lessonId ? Number(lessonId) : null, message:msg})});
-  const spoken = `${r.feedback || ''}. ${r.correction ? 'Try saying: ' + r.correction + '. ' : ''}${r.next_question || ''}`.trim();
-  window.lastLumaSpeech = spoken;
-  let html = `<div class="msg-head"><img class="robot-mini-img" src="/assets/luma.svg" alt=""><b>Luma</b></div>`;
-  html += `<div class="voice-response">🔊 ${escapeHtml(r.feedback)}</div>`;
-  if(r.correction) html += `<div class="robot-tip"><b>Tente assim:</b> ${escapeHtml(r.correction)}</div>`;
-  if(r.explanation_pt) html += `<small>${escapeHtml(r.explanation_pt)}</small>`;
-  html += `<div class="robot-question"><b>Agora responda:</b> ${escapeHtml(r.next_question)}</div>`;
-  if(r.points) toast(`+${r.points} XP por conversar com a IA!`, 'success');
-  chat.innerHTML += `<div class="msg ai robot">${html}<div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;"><button class="btn secondary" onclick="speak(window.lastLumaSpeech)">🔊 Ouvir</button><button class="btn secondary" onclick="startSpeechToInput('chatText', ()=>sendChat())">🎙️ Responder</button></div></div>`;
-  chat.scrollTop=chat.scrollHeight;
-  speak(spoken);
+  const input=document.getElementById('chatText'); const msg=input.value.trim(); if(!msg) return; const lessonId = document.getElementById('chatLessonId')?.value || null; const chat=document.getElementById('chat'); chat.innerHTML += `<div class="msg me"><b>Você:</b> ${escapeHtml(msg)}</div>`; input.value='';
+  const r=await api('/ai/chat',{method:'POST', body:JSON.stringify({lesson_id: lessonId ? Number(lessonId) : null, message:msg})}); const spoken = `${r.feedback || ''}. ${r.correction ? 'Try saying: ' + r.correction + '. ' : ''}${r.next_question || ''}`.trim(); window.lastLumaSpeech = spoken; const mood = r.mood === 'helping' ? 'ajudando' : r.mood === 'start' ? 'pronta' : 'feliz';
+  let html = `<div class="msg-head"><img class="robot-mini-img" src="/assets/luma.svg" alt=""><b>Luma</b><span class="luma-mood">${mood}</span></div>`; html += `<div class="voice-response">🔊 ${escapeHtml(r.feedback)}</div>`; if(r.correction) html += `<div class="robot-tip"><b>Tente assim:</b> ${escapeHtml(r.correction)}</div>`; if(r.explanation_pt) html += `<small>${escapeHtml(r.explanation_pt)}</small>`; html += `<div class="robot-question"><b>Minha próxima pergunta:</b> ${escapeHtml(r.next_question)}</div>`; if(r.points) toast(`+${r.points} XP por conversar com a Luma!`, 'success'); chat.innerHTML += `<div class="msg ai robot">${html}<div class="robot-actions"><button class="btn secondary" onclick="speak(window.lastLumaSpeech)">🔊 Ouvir</button><button class="btn secondary" onclick="startSpeechToInput('chatText', ()=>sendChat())">🎙️ Responder</button></div></div>`; chat.scrollTop=chat.scrollHeight; speak(spoken);
 }
 
 async function renderAdmin(){
