@@ -1,0 +1,15 @@
+[Unit]
+Description=Clube do Ingles FastAPI
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/clube-do-ingles/backend
+Environment="PATH=/var/www/clube-do-ingles/backend/venv/bin"
+ExecStart=/var/www/clube-do-ingles/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8008
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
