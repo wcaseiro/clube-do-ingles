@@ -1,11 +1,4 @@
-const API_BASE = (() => {
-  const host = window.location.hostname;
-  const port = window.location.port;
-  if ((port === '8080' || port === '8083') && host) {
-    return `${window.location.protocol}//${host}:8008/api`;
-  }
-  return '/api';
-})();
+const API_BASE = '/api';
 
 const store = {
   get token(){ return localStorage.getItem('token'); },
@@ -18,20 +11,49 @@ const store = {
 async function api(path, options = {}){
   const headers = options.headers || {};
   headers['Content-Type'] = headers['Content-Type'] || 'application/json';
-  if(store.token) headers['Authorization'] = `Bearer ${store.token}`;
-  const res = await fetch(API_BASE + path, { ...options, headers });
+
+  if(store.token){
+    headers['Authorization'] = `Bearer ${store.token}`;
+  }
+
+  const res = await fetch(API_BASE + path, {
+    ...options,
+    headers
+  });
+
   const text = await res.text();
   let data = null;
-  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
-  if(!res.ok){ throw new Error(data?.detail || data?.message || 'Erro na requisição'); }
+
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+
+  if(!res.ok){
+    throw new Error(data?.detail || data?.message || 'Erro na requisição');
+  }
+
   return data;
 }
 
 function toast(msg, type='info'){
-  const el=document.getElementById('toast');
-  el.textContent=msg;
+  const el = document.getElementById('toast');
+  if(!el){
+    alert(msg);
+    return;
+  }
+
+  el.textContent = msg;
   el.className = `toast ${type}`;
-  setTimeout(()=>el.classList.add('hidden'),3800);
+  el.classList.remove('hidden');
+
+  setTimeout(() => {
+    el.classList.add('hidden');
+  }, 3800);
 }
 
-function go(path){ history.pushState({}, '', path); render(); }
+function go(path){
+  history.pushState({}, '', path);
+  render();
+}
