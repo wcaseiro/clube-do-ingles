@@ -1,4 +1,3 @@
-from datetime import datetime
 from pydantic import BaseModel, Field
 
 class Token(BaseModel):
@@ -31,9 +30,17 @@ class ClassUpdate(BaseModel):
     code: str | None = None
     is_active: bool | None = None
 
+class StudentUpdate(BaseModel):
+    first_name: str | None = Field(default=None, min_length=2, max_length=80)
+    nickname: str | None = Field(default=None, min_length=2, max_length=80)
+    avatar: str | None = Field(default=None, max_length=80)
+    level: str | None = Field(default=None, max_length=80)
+    is_active: bool | None = None
+
 class InviteOut(BaseModel):
     code: str
     class_name: str
+    class_code: str | None = None
     level: str
     is_active: bool
 
@@ -61,3 +68,31 @@ class AIChatResponse(BaseModel):
     explanation_pt: str | None = None
     next_question: str
     points: int = 0
+    remaining_today: int | None = None
+    used_today: int | None = None
+    limit_today: int | None = None
+    mood: str | None = None
+    topic: str | None = None
+    status: str | None = None
+    understood: bool | None = None
+    needs_repeat: bool | None = None
+    source: str | None = None
+    fallback: bool | None = None
+
+
+class AIStartResponse(BaseModel):
+    feedback: str
+    correction: str | None = None
+    explanation_pt: str | None = None
+    next_question: str
+    points: int = 0
+    remaining_today: int | None = None
+    used_today: int | None = None
+    limit_today: int | None = None
+    mood: str | None = None
+    topic: str | None = None
+    status: str | None = None
+    understood: bool | None = None
+    needs_repeat: bool | None = None
+    source: str | None = None
+    fallback: bool | None = None

@@ -4,7 +4,8 @@ from sqlalchemy import func
 from ..database import get_db
 from ..models import User, Class, ClassStudent, Lesson, StudentProgress, XPEvent, AIConversation
 from ..auth import get_current_user
-from ..ranking import weekly_ranking, general_ranking
+from ..ranking import weekly_ranking, general_ranking, trail_ranking, conversation_ranking
+from ..avatar_rewards import avatar_stage_for_xp, EVOLUTION_AVATARS
 
 router = APIRouter(prefix="/student", tags=["student"])
 
@@ -13,6 +14,18 @@ def current_class(db: Session, user: User):
     if not link:
         return None
     return db.get(Class, link.class_id)
+
+def _student_info(user: User):
+    avatar_info = avatar_stage_for_xp(user.total_xp or 0)
+    return {
+        "first_name": user.first_name,
+        "nickname": user.nickname,
+        "avatar": user.avatar,
+        "level": user.level,
+        "total_xp": user.total_xp,
+        "streak_days": user.streak_days,
+        "evolution": avatar_info,
+    }
 
 @router.get("/dashboard")
 def dashboard(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
@@ -24,7 +37,7 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(get_current_us
         (StudentProgress.status == None) | (StudentProgress.status != "completed")
     ).order_by(Lesson.module_id, Lesson.order_index).first()
     return {
-        "student": {"first_name": user.first_name, "nickname": user.nickname, "avatar": user.avatar, "level": user.level, "total_xp": user.total_xp, "streak_days": user.streak_days},
+        "student": _student_info(user),
         "class": {"name": c.name, "code": c.code, "level": c.level} if c else None,
         "progress": {"completed_lessons": completed, "total_lessons": total_lessons, "percent": round((completed / total_lessons * 100), 1) if total_lessons else 0, "ai_conversations": ai_count},
         "mission": {"lesson_id": next_lesson.id, "title": next_lesson.title, "phrase_en": next_lesson.phrase_en} if next_lesson else None,
@@ -33,12 +46,21 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(get_current_us
 @router.get("/profile")
 def profile(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     c = current_class(db, user)
+    trail_xp = db.query(func.coalesce(func.sum(XPEvent.points), 0)).filter(
+        XPEvent.user_id == user.id,
+        XPEvent.event_type.in_(["lesson_completed", "quiz_completed", "quiz_bonus", "module_challenge"])
+    ).scalar() or 0
+    conversation_count = db.query(AIConversation).filter(AIConversation.user_id == user.id).count()
     return {
         "first_name": user.first_name, "nickname": user.nickname, "avatar": user.avatar, "level": user.level,
         "total_xp": user.total_xp, "streak_days": user.streak_days, "last_login_at": user.last_login_at,
         "class": c.name if c else None,
         "lessons_completed": db.query(StudentProgress).filter(StudentProgress.user_id == user.id, StudentProgress.status == "completed").count(),
-        "ai_conversations": db.query(AIConversation).filter(AIConversation.user_id == user.id).count(),
+        "ai_conversations": conversation_count,
+        "trail_xp": int(trail_xp or 0),
+        "conversation_score": int(conversation_count or 0) * 10,
+        "evolution": avatar_stage_for_xp(user.total_xp or 0),
+        "available_avatars": EVOLUTION_AVATARS,
     }
 
 @router.get("/trail")
@@ -59,4 +81,10 @@ def ranking(kind: str = "weekly", db: Session = Depends(get_db), user: User = De
     c = current_class(db, user)
     if not c:
         return []
-    return weekly_ranking(db, c.id) if kind == "weekly" else general_ranking(db, c.id)
+    if kind == "trail":
+        return trail_ranking(db, c.id)
+    if kind == "conversation":
+        return conversation_ranking(db, c.id)
+    if kind == "general":
+        return general_ranking(db, c.id)
+    return weekly_ranking(db, c.id)

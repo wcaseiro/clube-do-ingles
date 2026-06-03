@@ -20,20 +20,30 @@ function speak(text, lang='en-US'){
 function animateLumaSpeaking(){ document.querySelectorAll('.robot-avatar-img,.big-luma').forEach(el => { el.classList.add('talking'); setTimeout(()=>el.classList.remove('talking'), 1400); }); }
 
 function rewardSound(){
+  playToneSequence([523.25,659.25,783.99], 'sine', 0.12);
+}
+
+function correctionSound(){
+  playToneSequence([392,329.63], 'triangle', 0.09);
+}
+
+function playToneSequence(freqs, type='sine', volume=0.1){
   try{
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     const ctx = new AudioCtx();
-    [523.25,659.25,783.99].forEach((freq,i)=>{
+    freqs.forEach((freq,i)=>{
       const osc=ctx.createOscillator(); const gain=ctx.createGain();
-      osc.type='sine'; osc.frequency.value=freq;
-      gain.gain.setValueAtTime(0.0001, ctx.currentTime+i*0.09);
-      gain.gain.exponentialRampToValueAtTime(0.13, ctx.currentTime+i*0.09+0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+i*0.09+0.22);
+      osc.type=type; osc.frequency.value=freq;
+      const t = ctx.currentTime+i*0.11;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(volume, t+0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t+0.24);
       osc.connect(gain); gain.connect(ctx.destination);
-      osc.start(ctx.currentTime+i*0.09); osc.stop(ctx.currentTime+i*0.09+0.24);
+      osc.start(t); osc.stop(t+0.26);
     });
   }catch(e){}
 }
+
 function celebrate(text='Parabéns!'){
   rewardSound();
   const wrap=document.createElement('div');
@@ -63,38 +73,67 @@ function startSpeechToInput(inputId, onFinal){
   if(!input) return;
   const unavailable = micUnavailableMessage();
   if(unavailable){ toast(unavailable, 'warn'); return; }
+
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if(currentSpeechRecognition){ currentSpeechRecognition.stop(); currentSpeechRecognition = null; }
+
   const recognition = new SR();
   currentSpeechRecognition = recognition;
   recognition.lang = 'en-US';
   recognition.interimResults = true;
-  recognition.continuous = false;
+  recognition.continuous = true;
+
   let finalText = '';
+  let interimText = '';
+  let silenceTimer = null;
+  let alreadySent = false;
+  const silenceMs = Number(localStorage.getItem('voice_silence_ms') || 2400);
+
+  function scheduleStop(){
+    clearTimeout(silenceTimer);
+    silenceTimer = setTimeout(()=>{
+      try { recognition.stop(); } catch(e){}
+    }, silenceMs);
+  }
+
   if(mic) mic.classList.add('mic-listening');
-  recognition.onstart = () => toast('Estou ouvindo... fale uma frase curta em inglês.', 'success');
+  recognition.onstart = () => toast('Estou ouvindo... fale a frase completa. Eu espero você terminar.', 'success');
+
   recognition.onresult = (event) => {
-    let interim = '';
+    interimText = '';
     for(let i=event.resultIndex; i<event.results.length; i++){
       const text = event.results[i][0].transcript;
-      if(event.results[i].isFinal) finalText += text;
-      else interim += text;
+      if(event.results[i].isFinal){
+        finalText += (finalText ? ' ' : '') + text.trim();
+      } else {
+        interimText += text;
+      }
     }
-    input.value = (finalText || interim).trim();
+    input.value = (finalText + ' ' + interimText).trim();
+    scheduleStop();
   };
+
   recognition.onerror = (event) => {
+    clearTimeout(silenceTimer);
     const msg = event?.error === 'not-allowed'
       ? 'Permissão do microfone bloqueada. Libere o microfone no navegador e tente novamente.'
       : 'Não consegui ouvir bem. Tente novamente mais perto do microfone.';
     toast(msg, 'warn');
   };
+
   recognition.onend = () => {
+    clearTimeout(silenceTimer);
     if(mic) mic.classList.remove('mic-listening');
     currentSpeechRecognition = null;
     const value = input.value.trim();
-    if(value && typeof onFinal === 'function') onFinal(value);
+    if(value && !alreadySent && typeof onFinal === 'function'){
+      alreadySent = true;
+      setTimeout(()=>onFinal(value), 250);
+    }
   };
+
   recognition.start();
+  scheduleStop();
 }
 
 function toggleTranslation(id){
@@ -126,22 +165,21 @@ async function render(){
 
 function renderLogin(){
   showNav(false);
+  store.clear();
   app.innerHTML = `<div class="hero">
     <div>${logo()}<span class="badge">🌟 Web App/PWA</span><h1>Aprenda inglês conversando, jogando e evoluindo.</h1><p>Entre com o código da turma, nickname e senha. Sem e-mail, sem telefone e sem dados pessoais.</p></div>
-    <section class="hero-card"><h2>Entrar no Clube</h2><form id="loginForm" class="form">
-      <label>Código da turma</label><input name="class_code" value="HELENA2026" required>
-      <label>Nickname</label><input name="nickname" value="Helena" required>
-      <label>Senha</label><input name="password" type="password" value="helena123" required>
+    <section class="hero-card"><h2>Entrar no Clube</h2><form id="loginForm" class="form" autocomplete="off">
+      <label>Código da turma</label><input name="class_code" inputmode="text" placeholder="Ex: HELENA2026" autocomplete="off" autocapitalize="characters" spellcheck="false" required>
+      <label>Nickname</label><input name="nickname" placeholder="Seu nickname" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+      <label>Senha</label><input name="password" type="password" placeholder="Sua senha" autocomplete="new-password" required>
       <button class="btn">Entrar</button>
-      <button type="button" class="btn secondary" id="adminBtn">Entrar como admin</button>
+      <p class="safe-note mini">Os campos não vêm mais preenchidos automaticamente pelo app. Se aparecerem preenchidos, é o gerenciador de senhas do navegador.</p>
     </form></section></div>`;
-  document.getElementById('adminBtn').onclick = async()=>{
-    const data = await api('/auth/login',{method:'POST', body:JSON.stringify({class_code:'HELENA2026', nickname:'admin', password:'admin123'})});
-    store.token=data.access_token; store.user=data.user; go('/admin');
-  };
   document.getElementById('loginForm').onsubmit = async e => {
     e.preventDefault();
     const f=Object.fromEntries(new FormData(e.target));
+    f.class_code = String(f.class_code || '').trim().toUpperCase();
+    f.nickname = String(f.nickname || '').trim();
     const data=await api('/auth/login',{method:'POST', body:JSON.stringify(f)});
     store.token=data.access_token; store.user=data.user;
     go(data.user.role==='admin'?'/admin':'/app');
@@ -150,17 +188,42 @@ function renderLogin(){
 
 async function renderInvite(code){
   showNav(false);
+  store.clear();
   const invite = await api(`/invites/${code}`);
+  if(!invite.is_active){
+    app.innerHTML = `<div class="hero"><div>${logo()}<span class="badge">Convite</span><h1>Convite indisponível</h1><p>Este convite está inativo ou expirado.</p></div></div>`;
+    return;
+  }
   app.innerHTML = `<div class="hero"><div>${logo()}<span class="badge">Convite</span><h1>Bem-vindo ao Clube do Inglês!</h1><p>Você está entrando na turma <b>${escapeHtml(invite.class_name)}</b>.</p><div class="safe-note">Use apenas seu primeiro nome. Não informe sobrenome, telefone, escola, endereço ou redes sociais.</div></div>
-  <section class="hero-card"><h2>Criar acesso</h2><form id="inviteForm" class="form">
-    <label>Primeiro nome</label><input name="first_name" placeholder="Helena" required>
-    <label>Nickname para ranking</label><input name="nickname" placeholder="StarCat" required>
+  <section class="hero-card"><h2>Criar acesso</h2><form id="inviteForm" class="form" autocomplete="off">
+    <label>Turma</label><input name="class_view" value="${escapeHtml(invite.class_code || invite.class_name)}" readonly class="readonly-input" autocomplete="off">
+    <label>Primeiro nome</label><input name="first_name" placeholder="Ex: Helena" autocomplete="off" autocapitalize="words" required>
+    <label>Nickname para ranking</label><input name="nickname" placeholder="Ex: StarCat" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+    <small class="form-hint">Use um apelido amigável. Nicknames ofensivos são bloqueados automaticamente.</small>
     <label>Avatar</label><select name="avatar"><option>🌟</option><option>🦊</option><option>🐱</option><option>🐼</option><option>🚀</option><option>🎧</option></select>
-    <label>Senha</label><input name="password" type="password" required>
-    <label>Confirmar senha</label><input name="confirm_password" type="password" required>
-    <button class="btn">Entrar no clube</button>
+    <label>Senha</label><input name="password" type="password" autocomplete="new-password" required>
+    <label>Confirmar senha</label><input name="confirm_password" type="password" autocomplete="new-password" required>
+    <button class="btn">Criar e entrar direto</button>
   </form></section></div>`;
-  document.getElementById('inviteForm').onsubmit = async e => { e.preventDefault(); const f=Object.fromEntries(new FormData(e.target)); const data=await api(`/auth/register-invite/${code}`,{method:'POST',body:JSON.stringify(f)}); store.token=data.access_token; store.user=data.user; go('/app'); };
+  document.getElementById('inviteForm').onsubmit = async e => {
+    e.preventDefault();
+    const f=Object.fromEntries(new FormData(e.target));
+    delete f.class_view;
+    f.first_name = String(f.first_name || '').trim();
+    f.nickname = String(f.nickname || '').trim();
+    if(isOffensiveNickname(f.nickname)){ toast('Escolha um nickname amigável para o ranking.', 'warn'); return; }
+    const data=await api(`/auth/register-invite/${code}`,{method:'POST',body:JSON.stringify(f)});
+    store.token=data.access_token; store.user=data.user;
+    toast('Cadastro criado! Entrando na turma...', 'success');
+    go('/app');
+  };
+}
+
+function isOffensiveNickname(nickname=''){
+  const map = {'0':'o','1':'i','3':'e','4':'a','5':'s','7':'t','8':'b','@':'a','$':'s','!':'i'};
+  const norm = String(nickname).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[0134578@$!]/g, c=>map[c]||c).replace(/[^a-z0-9]/g,'');
+  const blocked = ['puta','puto','caralho','karalho','porra','merda','bosta','buceta','xota','piroca','rola','sexo','sex','porn','porno','xxx','nude','nudes','foda','fodase','fdp','filhodaputa','arrombado','otario','idiota','burro','babaca','hitler','nazista','nazi','racista','terrorista','fuck','shit','bitch','asshole','dick','pussy'];
+  return blocked.some(w => norm.includes(w));
 }
 
 async function renderDashboard(){
@@ -284,12 +347,43 @@ function showModalFeedback(type, title, message, sub, nextId){
   toast(message, type==='ok'?'success':'warn');
 }
 
+function renderRankingList(rows, empty='Sem pontuação ainda.'){
+  return rows.map(r=>`<div class="ranking-row ranking-row-evo">
+    <b>#${r.position}</b>
+    <span class="ranking-player">
+      <span class="ranking-avatar">${r.evolution_avatar || r.avatar || '⭐'}</span>
+      <span><b>${escapeHtml(r.nickname)}</b><small>${escapeHtml(r.evolution_name || 'Explorador')}</small></span>
+    </span>
+    <b>${r.xp} pts</b>
+  </div>`).join('') || `<p>${empty}</p>`;
+}
+
 async function renderRanking(){
   if(!protect()) return; showNav(true);
-  const weekly = await api('/student/ranking?kind=weekly'); const general = await api('/student/ranking?kind=general');
-  app.innerHTML = `<div class="topbar"><div class="title"><h1>Ranking</h1><p>Competição saudável: somente nickname, avatar e XP.</p></div></div>
-  ${card(`<h2>🏆 Semanal</h2><div class="grid">${weekly.map(r=>`<div class="ranking-row"><b>#${r.position}</b><span>${r.avatar||'⭐'} ${escapeHtml(r.nickname)}</span><b>${r.xp} XP</b></div>`).join('')||'<p>Sem pontuação ainda.</p>'}</div>`)}
-  ${card(`<h2>🌍 Geral</h2><div class="grid">${general.map(r=>`<div class="ranking-row"><b>#${r.position}</b><span>${r.avatar||'⭐'} ${escapeHtml(r.nickname)}</span><b>${r.xp} XP</b></div>`).join('')||'<p>Sem pontuação ainda.</p>'}</div>`)};`;
+  const [weekly, general, trail, conversation] = await Promise.all([
+    api('/student/ranking?kind=weekly'),
+    api('/student/ranking?kind=general'),
+    api('/student/ranking?kind=trail').catch(()=>[]),
+    api('/student/ranking?kind=conversation').catch(()=>[])
+  ]);
+
+  app.innerHTML = `<div class="topbar"><div class="title"><h1>Ranking</h1><p>Competição saudável: trilha, conversação e evolução de avatar.</p></div></div>
+
+  ${card(`<h2>🧭 Score por trilha</h2>
+    <p class="muted">Pontuação das aulas, quizzes e desafios concluídos.</p>
+    <div class="grid">${renderRankingList(trail)}</div>`)}
+
+  ${card(`<h2>🤖 Score por conversação</h2>
+    <p class="muted">Pontuação baseada nas conversas com a Luma.</p>
+    <div class="grid">${renderRankingList(conversation)}</div>`)}
+
+  ${card(`<h2>🏆 Semanal</h2><div class="grid">${renderRankingList(weekly)}</div>`)}
+
+  ${card(`<h2>🌍 Geral</h2><div class="grid">${renderRankingList(general)}</div>
+    <div class="avatar-evolution-note">
+      <b>Avatares evolutivos:</b> ao juntar XP, novos avatares são liberados automaticamente: 🤖 → 🛸 → 🚀 → 🦾 → 🌟 → 👑
+    </div>`)}
+  `;
 }
 
 async function renderProfile(){
@@ -299,40 +393,510 @@ async function renderProfile(){
   ${card(`<div class="stat"><div class="avatar">${p.avatar||'⭐'}</div><div><b>${escapeHtml(p.nickname)}</b><span>${escapeHtml(p.first_name)} · ${escapeHtml(p.level)}</span></div></div><hr><p><b>XP total:</b> ${p.total_xp}</p><p><b>Aulas concluídas:</b> ${p.lessons_completed}</p><p><b>Conversas com IA:</b> ${p.ai_conversations}</p><p><b>Sequência:</b> ${p.streak_days} dias</p><button class="btn danger" onclick="logout()">Sair</button>`)};`;
 }
 
+
+function getLumaStatus(resp){
+  const status = String(resp?.status || '').toLowerCase();
+  if(resp?.needs_repeat || status === 'repeat'){
+    return {
+      type: 'warn',
+      badge: '🟡 Preciso de mais uma tentativa',
+      title: 'Quase! A Luma precisa que você tente de novo.'
+    };
+  }
+
+  if(resp && resp.correction){
+    return {
+      type: 'warn',
+      badge: '🟡 Vamos ajustar',
+      title: 'Eu entendi sua ideia, mas vamos melhorar a frase.'
+    };
+  }
+
+  return {
+    type: 'ok',
+    badge: '✅ Entendi você',
+    title: 'Muito bem! Sua resposta foi entendida.'
+  };
+}
+
+function renderAIUsage(usage){
+  if(!usage) return '<div id="aiUsage" class="ai-usage loading"><span>Uso diário da Luma</span><div class="ai-usage-bar"><i style="width:0%"></i></div></div>';
+  const limit = Number(usage.limit_today ?? 20);
+  const used = Number(usage.used_today ?? 0);
+  const percent = Math.max(0, Math.min(100, Number(usage.usage_percent ?? (limit ? used / limit * 100 : 0))));
+  const provider = escapeHtml(usage.provider || 'ia');
+  const danger = percent >= 85 ? ' danger' : '';
+  const label = percent >= 85 ? 'Quase no limite de hoje' : percent >= 50 ? 'Bom treino hoje' : 'Pronto para conversar';
+  return `<div id="aiUsage" class="ai-usage${danger}">
+    <div class="ai-usage-top"><span>💬 Uso diário da Luma</span><small>${provider}</small></div>
+    <div class="ai-usage-bar" title="${used}/${limit} interações usadas"><i style="width:${percent}%"></i></div>
+    <small>${label}</small>
+  </div>`;
+}
+
+function updateLumaUsage(resp){
+  const box = document.getElementById('aiUsage');
+  if(!box || typeof resp?.used_today !== 'number') return;
+  const limit = Number(resp.limit_today ?? 20);
+  const used = Number(resp.used_today ?? 0);
+  const percent = Math.max(0, Math.min(100, Number(resp.usage_percent ?? (limit ? used / limit * 100 : 0))));
+  const source = escapeHtml(resp.source || resp.provider || 'ia');
+  const danger = percent >= 85 ? ' danger' : '';
+  const label = percent >= 85 ? 'Quase no limite de hoje' : percent >= 50 ? 'Bom treino hoje' : 'Pronto para conversar';
+  box.className = `ai-usage${danger}`;
+  box.innerHTML = `<div class="ai-usage-top"><span>💬 Uso diário da Luma</span><small>${source}</small></div>
+    <div class="ai-usage-bar" title="${used}/${limit} interações usadas"><i style="width:${percent}%"></i></div>
+    <small>${label}</small>`;
+}
+
+function renderUserBubble(text){
+  return `
+    <div class="ai-row user">
+      <div class="ai-bubble-user">
+        <b>Você:</b> ${escapeHtml(text)}
+      </div>
+    </div>
+  `;
+}
+
+function shouldShowExplanation(resp){
+  const txt = String(resp?.explanation_pt || '').trim();
+  if(!txt) return false;
+  if(!resp?.correction && !resp?.needs_repeat){
+    const low = txt.toLowerCase();
+    if(low.includes('perfeita') || low.includes('foi entendida') || low.includes('fez sentido')) return false;
+  }
+  return true;
+}
+
+function renderLumaCard(resp, originalText=''){
+  resp = resp || {};
+  const status = getLumaStatus(resp);
+  const feedback = resp.feedback || status.title;
+  const explanation = resp.explanation_pt || '';
+  const nextQuestion = resp.next_question || 'Can you try again?';
+  const correction = resp.correction || '';
+  const source = resp.source || '';
+  const fallback = Boolean(resp.fallback);
+
+  const originalBlock = (correction || resp.needs_repeat) && originalText ? `
+    <div class="luma-block original">
+      <small>💬 Sua frase</small>
+      <strong>${escapeHtml(originalText)}</strong>
+    </div>
+  ` : '';
+
+  const correctionBlock = correction ? `
+    <div class="luma-block correction">
+      <small>🛠️ Tente assim</small>
+      <strong>${escapeHtml(correction)}</strong>
+    </div>
+  ` : '';
+
+  const explainBlock = shouldShowExplanation(resp) ? `
+    <div class="luma-explain ${status.type}">
+      <b>${status.type === 'warn' ? '📚 Por quê?' : '✨ Dica rápida'}</b><br>
+      ${escapeHtml(explanation)}
+    </div>
+  ` : '';
+
+  const nextLabel = correction || resp.needs_repeat ? '🔁 Tente responder essa missão' : '🎯 Próxima missão';
+  const sourceChip = source ? `<span class="luma-source ${fallback ? 'fallback' : ''}">${fallback ? 'modo local' : source}</span>` : '';
+
+  return `
+    <div class="ai-row luma">
+      <div class="luma-card ${status.type}" data-speak="${escapeHtml(`${feedback}. ${correction ? 'Try saying: ' + correction + '. ' : ''}${nextQuestion}`)}">
+        <div class="luma-head">
+          <div class="luma-head-left">
+            <img src="/assets/luma-avatar.png" class="luma-avatar-mini" alt="Luma">
+            <div>
+              <div class="luma-name">Luma</div>
+              <div class="luma-subtitle">Professora de inglês</div>
+            </div>
+          </div>
+          <div class="luma-head-badges">
+            ${sourceChip}
+            <div class="luma-badge ${status.type}">${status.badge}</div>
+          </div>
+        </div>
+
+        <div class="luma-feedback">${escapeHtml(feedback)}</div>
+
+        ${originalBlock}
+        ${correctionBlock}
+        ${explainBlock}
+
+        <div class="luma-block next">
+          <small>${nextLabel}</small>
+          <strong>${escapeHtml(nextQuestion)}</strong>
+        </div>
+
+        <div class="luma-actions">
+          <button class="luma-btn-small" onclick="speakLumaMessage(this)">🔊 Ouvir</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderLumaStartCard(){
+  return `
+    <div class="ai-row luma">
+      <div class="luma-card start">
+        <div class="luma-head">
+          <div class="luma-head-left">
+            <img src="/assets/luma-avatar.png" class="luma-avatar-mini" alt="Luma">
+            <div>
+              <div class="luma-name">Luma</div>
+              <div class="luma-subtitle">Professora de inglês</div>
+            </div>
+          </div>
+          <div class="luma-badge start">✨ pronta</div>
+        </div>
+        <div class="luma-feedback">Vamos praticar inglês juntos?</div>
+        <div class="luma-tip">Clique em <b>Vamos conversar</b>. Eu vou me apresentar e começar uma conversa no seu ritmo.</div>
+        <div class="luma-actions">
+          <button id="startLumaBtn" class="btn luma-start-btn">🚀 Vamos conversar</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderLumaLoading(){
+  return `
+    <div class="ai-row luma" id="lumaLoading">
+      <div class="luma-card thinking">
+        <div class="luma-head">
+          <div class="luma-head-left">
+            <img src="/assets/luma-avatar.png" class="luma-avatar-mini" alt="Luma">
+            <div>
+              <div class="luma-name">Luma</div>
+              <div class="luma-subtitle">analisando com calma...</div>
+            </div>
+          </div>
+          <div class="luma-badge thinking">✨ Pensando</div>
+        </div>
+        <div class="luma-thinking-text">Estou esperando a frase completa e comparando com a missão atual.</div>
+        <div class="luma-dots"><span></span><span></span><span></span></div>
+      </div>
+    </div>
+  `;
+}
+
+function speakLumaMessage(btn){
+  const card = btn.closest('.luma-card');
+  if(!card) return;
+  const text = card.dataset.speak || card.innerText.replace(/\s+/g, ' ').trim();
+  speak(text, 'en-US');
+}
+
+function renderAIComposer(){
+  return `
+    <div class="ai-composer">
+      <input
+        id="chatText"
+        class="ai-input"
+        type="text"
+        placeholder="Escreva sua resposta em inglês..."
+        autocomplete="off"
+      />
+      <button id="sendChat" class="ai-send">Enviar</button>
+    </div>
+
+    <div class="ai-helper">
+      🎤 Ao falar, faça a frase completa. A Luma espera uma pausa maior antes de enviar.
+    </div>
+
+    <button id="voiceAnswerBtn" class="ai-mic-fab" type="button" aria-label="Falar com a Luma">
+      <span>🎙️</span>
+      <span>Falar</span>
+    </button>
+  `;
+}
+
+async function loadAIUsage(){
+  try { return await api('/ai/usage'); }
+  catch { return null; }
+}
+
 async function renderAI(){
-  if(!protect()) return; showNav(true);
-  const params = new URLSearchParams(location.search); const lessonId = params.get('lesson') || ''; const micWarn = micUnavailableMessage(); const currentRate = localStorage.getItem('voice_rate') || 'normal';
-  app.innerHTML = `<div class="ai-page"><section class="luma-header"><img class="robot-avatar-img big-luma" src="/assets/luma-avatar.png" alt="Luma, robô professora"><div><span class="badge">🤖 Luma · conversa por voz</span><h1>Fale inglês comigo!</h1><p>Eu faço perguntas curtas, escuto sua resposta e te ajudo a melhorar.</p><div class="speed-toggle"><button class="btn secondary ${currentRate==='normal'?'active':''}" data-rate="normal" onclick="setVoiceRate('normal')">⚡ Normal</button><button class="btn secondary ${currentRate==='slow'?'active':''}" data-rate="slow" onclick="setVoiceRate('slow')">🐢 Mais lento</button></div></div></section>${micWarn ? `<div class="safe-note">🎙️ ${escapeHtml(micWarn)}</div>` : `<div class="voice-ready">🎙️ Microfone pronto. Toque no botão grande para responder.</div>`}<section class="voice-card"><div id="chat" class="chat voice-chat"><div class="msg ai robot"><div class="msg-head"><img class="robot-mini-img" src="/assets/luma-avatar.png" alt=""><b>Luma</b><span class="luma-mood">animada</span></div><span id="lastLumaText">Hello, explorer! I am Luma. What is your name?</span><div class="robot-actions"><button class="btn secondary" onclick="speak(window.lastLumaSpeech)">🔊 Ouvir</button></div></div></div><div class="quick-actions"><button class="btn luma-start" id="startVoiceLesson">▶️ Começar</button><button class="btn secondary" id="hearLastBtn">🔊 Repetir Luma</button></div><div class="chat-input typed-fallback"><input id="chatText" placeholder="Ou escreva sua resposta..." autocomplete="off"><button class="btn" id="sendChat">Enviar</button></div><input type="hidden" id="chatLessonId" value="${lessonId}"></section><button class="floating-mic" id="floatingMic" aria-label="Responder por voz">🎙️<span>Falar</span></button></div>`;
-  const first = "Hello, explorer! I am Luma. What is your name?"; window.lastLumaSpeech = first;
-  document.getElementById('sendChat').onclick = sendChat; document.getElementById('startVoiceLesson').onclick = () => { speak(first); setTimeout(()=>startSpeechToInput('chatText', ()=>sendChat()), 1300); }; document.getElementById('hearLastBtn').onclick = () => speak(window.lastLumaSpeech || first); document.getElementById('floatingMic').onclick = () => startSpeechToInput('chatText', ()=>sendChat()); document.getElementById('chatText').addEventListener('keydown', e=>{ if(e.key==='Enter') sendChat(); });
+  if(!protect()) return;
+  showNav(true);
+
+  const params = new URLSearchParams(location.search);
+  const lessonId = params.get('lesson') || '';
+  const micWarn = micUnavailableMessage();
+  const currentRate = localStorage.getItem('voice_rate') || 'normal';
+  const usage = await loadAIUsage();
+
+  app.innerHTML = `
+    <div class="ai-page ai-page-clean">
+      <section class="luma-header luma-header-clean">
+        <img class="robot-avatar-img big-luma" src="/assets/luma-avatar.png" alt="Luma, robô professora">
+        <div>
+          <div class="luma-header-top">
+            <span class="badge">🤖 Luma · professora de inglês</span>
+            ${renderAIUsage(usage)}
+          </div>
+          <h1>Fale inglês comigo!</h1>
+          <p>Converse sobre assuntos do dia a dia. Eu vou lembrar do que já falamos e mudar os temas com o tempo.</p>
+          <div class="speed-toggle">
+            <button class="btn secondary ${currentRate==='normal'?'active':''}" data-rate="normal" onclick="setVoiceRate('normal')">⚡ Normal</button>
+            <button class="btn secondary ${currentRate==='slow'?'active':''}" data-rate="slow" onclick="setVoiceRate('slow')">🐢 Mais lento</button>
+          </div>
+        </div>
+      </section>
+
+      ${micWarn ? `<div class="safe-note">🎙️ ${escapeHtml(micWarn)}</div>` : `<div class="voice-ready">🎙️ Microfone pronto. Toque no botão laranja e fale a frase completa.</div>`}
+
+      <section class="ai-stage">
+        <div id="chat" class="ai-chat">
+          ${renderLumaStartCard()}
+        </div>
+
+        ${renderAIComposer()}
+        <input type="hidden" id="chatLessonId" value="${lessonId}">
+      </section>
+    </div>
+  `;
+
+  document.getElementById('sendChat').onclick = sendChat;
+  document.getElementById('voiceAnswerBtn').onclick = () => startSpeechToInput('chatText', ()=>sendChat());
+  document.getElementById('chatText').addEventListener('keydown', e=>{ if(e.key==='Enter') sendChat(); });
+  document.getElementById('startLumaBtn')?.addEventListener('click', startLumaConversation);
+}
+
+async function startLumaConversation(){
+  const chat = document.getElementById('chat');
+  if(!chat) return;
+  document.getElementById('startLumaBtn')?.setAttribute('disabled','disabled');
+  chat.innerHTML += renderLumaLoading();
+  chat.scrollTop = chat.scrollHeight;
+
+  let r;
+  try{
+    r = await api('/ai/start', {method:'POST', body:'{}'});
+  }catch(err){
+    document.getElementById('lumaLoading')?.remove();
+    chat.innerHTML += renderLumaCard({
+      feedback: 'Ops! Não consegui iniciar agora.',
+      correction: null,
+      explanation_pt: err.message || 'Tente novamente em alguns segundos.',
+      next_question: 'Can you try again?',
+      mood: 'helping',
+      topic: 'retry',
+      status: 'repeat',
+      understood: false,
+      needs_repeat: true,
+      source: 'erro'
+    });
+    return;
+  }
+
+  document.getElementById('lumaLoading')?.remove();
+  chat.innerHTML += renderLumaCard(r);
+  updateLumaUsage(r);
+  window.lastLumaSpeech = `${r.feedback || ''}. ${r.next_question || ''}`.trim();
+  speak(window.lastLumaSpeech, 'en-US');
+  chat.scrollTop = chat.scrollHeight;
 }
 
 async function sendChat(){
-  const input=document.getElementById('chatText'); const msg=input.value.trim(); if(!msg) return; const lessonId = document.getElementById('chatLessonId')?.value || null; const chat=document.getElementById('chat'); chat.innerHTML += `<div class="msg me"><b>Você:</b> ${escapeHtml(msg)}</div>`; input.value='';
+  const input = document.getElementById('chatText');
+  const lessonId = document.getElementById('chatLessonId')?.value || null;
+  const chat = document.getElementById('chat');
+
+  if(!input || !chat) return;
+
+  const msg = input.value.trim();
+  if(!msg) return;
+
+  chat.innerHTML += renderUserBubble(msg);
+  input.value = '';
+  input.focus();
+  chat.innerHTML += renderLumaLoading();
+  chat.scrollTop = chat.scrollHeight;
+
   let r;
   try {
-    r = await api('/ai/chat',{method:'POST', body:JSON.stringify({lesson_id: lessonId ? Number(lessonId) : null, message:msg})});
+    r = await api('/ai/chat',{
+      method:'POST',
+      body:JSON.stringify({
+        lesson_id: lessonId ? Number(lessonId) : null,
+        message: msg
+      })
+    });
   } catch(err) {
-    chat.innerHTML += `<div class="msg ai robot"><div class="msg-head"><img class="robot-mini-img" src="/assets/luma-avatar.png" alt=""><b>Luma</b></div>${escapeHtml(err.message || 'Não consegui responder agora.')}</div>`;
-    chat.scrollTop=chat.scrollHeight;
+    document.getElementById('lumaLoading')?.remove();
+    correctionSound();
+    chat.innerHTML += renderLumaCard({
+      feedback: 'Ops! Não consegui responder agora.',
+      correction: null,
+      explanation_pt: err.message || 'Tente novamente em alguns segundos.',
+      next_question: 'Can you try again?',
+      mood: 'helping',
+      topic: 'retry',
+      status: 'repeat',
+      understood: false,
+      needs_repeat: true,
+      source: 'erro'
+    }, msg);
+    chat.scrollTop = chat.scrollHeight;
     toast(err.message || 'Erro ao conversar com a Luma', 'warn');
     return;
-  } const spoken = `${r.feedback || ''}. ${r.correction ? 'Try saying: ' + r.correction + '. ' : ''}${r.next_question || ''}`.trim(); window.lastLumaSpeech = spoken; const mood = r.mood === 'helping' ? 'ajudando' : r.mood === 'start' ? 'pronta' : 'feliz';
-  let html = `<div class="msg-head"><img class="robot-mini-img" src="/assets/luma-avatar.png" alt=""><b>Luma</b><span class="luma-mood">${mood}</span></div>`; html += `<div class="voice-response">🔊 ${escapeHtml(r.feedback)}</div>`; if(r.correction) html += `<div class="robot-tip"><b>Tente assim:</b> ${escapeHtml(r.correction)}</div>`; if(r.explanation_pt) html += `<small>${escapeHtml(r.explanation_pt)}</small>`; html += `<div class="robot-question"><b>Minha próxima pergunta:</b> ${escapeHtml(r.next_question)}</div>`; if(r.points) toast(`+${r.points} XP por conversar com a Luma!`, 'success');
-  if(typeof r.remaining_today === 'number') toast(`Você ainda tem ${r.remaining_today} conversas com a Luma hoje.`, 'info'); chat.innerHTML += `<div class="msg ai robot">${html}<div class="robot-actions"><button class="btn secondary" onclick="speak(window.lastLumaSpeech)">🔊 Ouvir</button><button class="btn secondary" onclick="startSpeechToInput('chatText', ()=>sendChat())">🎙️ Responder</button></div></div>`; chat.scrollTop=chat.scrollHeight; speak(spoken);
+  }
+
+  document.getElementById('lumaLoading')?.remove();
+
+  const spoken = `${r.feedback || ''}. ${r.correction ? 'Try saying: ' + r.correction + '. ' : ''}${r.next_question || ''}`.trim();
+  window.lastLumaSpeech = spoken;
+
+  chat.innerHTML += renderLumaCard(r, msg);
+  chat.scrollTop = chat.scrollHeight;
+  updateLumaUsage(r);
+
+  if(r.correction || r.needs_repeat || r.status === 'repeat' || r.status === 'correction') correctionSound();
+  else rewardSound();
+
+  if(r.points) toast(`+${r.points} XP por conversar com a Luma!`, 'success');
+
+  speak(spoken, 'en-US');
 }
 
 async function renderAdmin(){
-  if(!protect()) return; showNav(false);
-  const user=store.user; if(user?.role!=='admin'){ app.innerHTML=card('<h1>Acesso restrito</h1><button class="btn" onclick="go(\'/app\')">Voltar</button>'); return; }
-  const d=await api('/admin/dashboard'); const classes=await api('/admin/classes'); const students=await api('/admin/students');
-  app.innerHTML = `${logo()}<div class="topbar"><div class="title"><h1>Painel admin</h1><p>Gerencie turmas, convites e alunos.</p></div><button class="btn ghost" onclick="logout()">Sair</button></div>
-  <div class="grid cols-3">${card(`<b>${d.students}</b><p>Alunos</p>`)}${card(`<b>${d.classes}</b><p>Turmas ativas</p>`)}${card(`<b>${d.xp_total}</b><p>XP gerado</p>`)}</div>
-  ${card(`<h2>Nova turma</h2><form id="classForm" class="form"><input name="name" placeholder="Nome da turma" required><input name="code" placeholder="Código ex: HELENA2026" required><input name="level" value="A1 Beginner"><button class="btn">Criar turma</button></form>`)}
-  ${card(`<h2>Turmas</h2><table class="table"><thead><tr><th>Nome</th><th>Código</th><th>Alunos</th><th>Convite</th></tr></thead><tbody>${classes.map(c=>`<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.code)}</td><td>${c.students}</td><td><button class="btn secondary" onclick="makeInvite(${c.id})">Gerar</button></td></tr>`).join('')}</tbody></table>`)}
-  ${card(`<h2>Alunos</h2><table class="table"><thead><tr><th>Nome</th><th>Nickname</th><th>Turma</th><th>XP</th></tr></thead><tbody>${students.map(s=>`<tr><td>${escapeHtml(s.first_name)}</td><td>${escapeHtml(s.nickname)}</td><td>${escapeHtml(s.class_name)}</td><td>${s.total_xp}</td></tr>`).join('')}</tbody></table>`)};`;
-  document.getElementById('classForm').onsubmit = async e=>{ e.preventDefault(); const f=Object.fromEntries(new FormData(e.target)); await api('/admin/classes',{method:'POST',body:JSON.stringify(f)}); toast('Turma criada!', 'success'); renderAdmin(); };
+  if(!protect()) return;
+  showNav(false);
+  const user=store.user;
+  if(user?.role!=='admin'){
+    app.innerHTML=card('<h1>Acesso restrito</h1><button class="btn" onclick="go(\'/app\')">Voltar</button>');
+    return;
+  }
+
+  const d=await api('/admin/dashboard');
+  const classes=await api('/admin/classes');
+  const students=await api('/admin/students');
+
+  app.innerHTML = `${logo()}
+  <div class="topbar">
+    <div class="title"><h1>Painel admin</h1><p>Gerencie turmas, convites e alunos.</p></div>
+    <button class="btn ghost" onclick="logout()">Sair</button>
+  </div>
+
+  <div class="grid cols-3">
+    ${card(`<b>${d.students}</b><p>Alunos ativos</p>`)}
+    ${card(`<b>${d.classes}</b><p>Turmas ativas</p>`)}
+    ${card(`<b>${d.xp_total}</b><p>XP gerado</p>`)}
+  </div>
+
+  ${card(`<h2>Nova turma</h2>
+    <form id="classForm" class="form admin-form-inline" autocomplete="off">
+      <input name="name" placeholder="Nome da turma" required autocomplete="off">
+      <input name="code" placeholder="Código ex: HELENA2026" required autocomplete="off" autocapitalize="characters">
+      <input name="level" value="A1 Beginner" autocomplete="off">
+      <button class="btn">Criar turma</button>
+    </form>`)}
+
+  ${card(`<h2>Turmas</h2>
+    <table class="table admin-table">
+      <thead><tr><th>Nome</th><th>Código</th><th>Status</th><th>Alunos</th><th>Convite</th></tr></thead>
+      <tbody>${classes.map(c=>`<tr>
+        <td>${escapeHtml(c.name)}</td>
+        <td><b>${escapeHtml(c.code)}</b></td>
+        <td>${c.is_active?'<span class="status-pill ok">Ativa</span>':'<span class="status-pill off">Inativa</span>'}</td>
+        <td>${c.students}</td>
+        <td><button class="btn secondary btn-small" onclick="makeInvite(${c.id})">Gerar convite</button></td>
+      </tr>`).join('')}</tbody>
+    </table>`)}
+
+  ${card(`<div class="admin-section-title"><div><h2>Alunos</h2><p>Edite dados, desabilite acesso ou gere nova senha.</p></div></div>
+    <table class="table admin-table">
+      <thead><tr><th>Nome</th><th>Nickname</th><th>Turma</th><th>XP</th><th>Status</th><th>Ações</th></tr></thead>
+      <tbody>${students.map(s=>`<tr class="${s.is_active?'':'row-disabled'}">
+        <td>${escapeHtml(s.first_name)}</td>
+        <td><b>${escapeHtml(s.nickname)}</b></td>
+        <td>${escapeHtml(s.class_name || '-')}</td>
+        <td>${s.total_xp}</td>
+        <td>${s.is_active?'<span class="status-pill ok">Ativo</span>':'<span class="status-pill off">Desabilitado</span>'}</td>
+        <td class="actions-cell">
+          <button class="btn secondary btn-mini" onclick='adminEditStudent(${JSON.stringify(s).replaceAll("'", "&#39;")})'>Editar</button>
+          <button class="btn secondary btn-mini" onclick="adminResetPassword(${s.id}, '${escapeHtml(s.nickname)}')">Resetar senha</button>
+          <button class="btn ${s.is_active?'danger':'success'} btn-mini" onclick="adminToggleStudent(${s.id}, ${s.is_active})">${s.is_active?'Desabilitar':'Habilitar'}</button>
+        </td>
+      </tr>`).join('')}</tbody>
+    </table>`)}
+
+  <div id="adminModal" class="modal hidden"></div>`;
+
+  document.getElementById('classForm').onsubmit = async e=>{
+    e.preventDefault();
+    const f=Object.fromEntries(new FormData(e.target));
+    f.code = String(f.code || '').trim().toUpperCase();
+    await api('/admin/classes',{method:'POST',body:JSON.stringify(f)});
+    toast('Turma criada!', 'success');
+    renderAdmin();
+  };
 }
-async function makeInvite(id){ const r=await api(`/admin/classes/${id}/invite`,{method:'POST',body:'{}'}); const full=location.origin + r.link; await navigator.clipboard?.writeText(full).catch(()=>{}); toast(`Convite gerado/copiadо: ${full}`, 'success'); }
+
+async function makeInvite(id){
+  const r=await api(`/admin/classes/${id}/invite`,{method:'POST',body:'{}'});
+  const full=location.origin + r.link;
+  await navigator.clipboard?.writeText(full).catch(()=>{});
+  toast(`Convite gerado e copiado: ${full}`, 'success');
+  alert(`Convite da turma ${r.class_code || ''}\n\n${full}\n\nAo abrir esse link, a turma já aparece preenchida e o aluno entra direto após criar o cadastro.`);
+}
+
+function closeAdminModal(){
+  const modal = document.getElementById('adminModal');
+  if(modal){ modal.classList.add('hidden'); modal.innerHTML=''; }
+}
+
+function adminEditStudent(student){
+  const modal = document.getElementById('adminModal');
+  if(!modal) return;
+  modal.classList.remove('hidden');
+  modal.innerHTML = `<div class="modal-card">
+    <div class="modal-head"><h2>Editar aluno</h2><button class="btn ghost" onclick="closeAdminModal()">Fechar</button></div>
+    <form id="studentEditForm" class="form" autocomplete="off">
+      <label>Primeiro nome</label><input name="first_name" value="${escapeHtml(student.first_name || '')}" autocomplete="off" required>
+      <label>Nickname</label><input name="nickname" value="${escapeHtml(student.nickname || '')}" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+      <small class="form-hint">Nicknames ofensivos são bloqueados automaticamente.</small>
+      <label>Avatar</label><select name="avatar">
+        ${['🌟','🦊','🐱','🐼','🚀','🎧','🤖','⚽','🎮','📚'].map(a=>`<option ${student.avatar===a?'selected':''}>${a}</option>`).join('')}
+      </select>
+      <label>Nível</label><input name="level" value="${escapeHtml(student.level || 'Beginner 1')}" autocomplete="off">
+      <label class="check-line"><input type="checkbox" name="is_active" ${student.is_active?'checked':''}> Usuário ativo</label>
+      <button class="btn">Salvar alterações</button>
+    </form>
+  </div>`;
+
+  document.getElementById('studentEditForm').onsubmit = async e=>{
+    e.preventDefault();
+    const f=Object.fromEntries(new FormData(e.target));
+    f.first_name = String(f.first_name || '').trim();
+    f.nickname = String(f.nickname || '').trim();
+    f.is_active = Boolean(f.is_active);
+    if(isOffensiveNickname(f.nickname)){ toast('Escolha um nickname amigável para o ranking.', 'warn'); return; }
+    await api(`/admin/students/${student.id}`,{method:'PUT',body:JSON.stringify(f)});
+    toast('Aluno atualizado!', 'success');
+    closeAdminModal();
+    renderAdmin();
+  };
+}
+
+async function adminResetPassword(id, nickname){
+  if(!confirm(`Resetar a senha de ${nickname}?`)) return;
+  const r = await api(`/admin/students/${id}/reset-password`,{method:'POST',body:'{}'});
+  alert(`Nova senha de ${r.nickname}:\n\n${r.new_password}\n\nCopie e envie ao aluno/responsável.`);
+}
+
+async function adminToggleStudent(id, isActive){
+  const action = isActive ? 'desabilitar' : 'habilitar';
+  if(!confirm(`Deseja ${action} este usuário?`)) return;
+  await api(`/admin/students/${id}/toggle-active`,{method:'POST',body:'{}'});
+  toast(isActive ? 'Usuário desabilitado.' : 'Usuário habilitado.', 'success');
+  renderAdmin();
+}
+
 function logout(){ store.clear(); go('/'); }
 render();
