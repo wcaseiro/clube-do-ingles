@@ -15,6 +15,7 @@ class User(Base):
     total_xp = Column(Integer, default=0)
     streak_days = Column(Integer, default=0)
     last_login_at = Column(DateTime)
+    last_seen_at = Column(DateTime)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -121,3 +122,42 @@ class AIConversation(Base):
     ai_response = Column(Text, nullable=False)
     correction_json = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Challenge(Base):
+    __tablename__ = "challenges"
+    id = Column(Integer, primary_key=True, index=True)
+    class_id = Column(Integer, ForeignKey("classes.id"), nullable=False)
+    challenger_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    opponent_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    status = Column(String(30), default="active")
+    challenger_score = Column(Integer, default=0)
+    opponent_score = Column(Integer, default=0)
+    winner_id = Column(Integer, ForeignKey("users.id"))
+    summary_json = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    accepted_at = Column(DateTime)
+    completed_at = Column(DateTime)
+
+class ChallengeItem(Base):
+    __tablename__ = "challenge_items"
+    id = Column(Integer, primary_key=True, index=True)
+    challenge_id = Column(Integer, ForeignKey("challenges.id"), nullable=False)
+    lesson_id = Column(Integer, ForeignKey("lessons.id"))
+    item_type = Column(String(40), nullable=False)
+    prompt = Column(Text, nullable=False)
+    expected_answer = Column(Text, nullable=False)
+    expected_alt = Column(Text)
+    options_json = Column(Text)
+    order_index = Column(Integer, nullable=False)
+
+class ChallengeAnswer(Base):
+    __tablename__ = "challenge_answers"
+    id = Column(Integer, primary_key=True, index=True)
+    challenge_id = Column(Integer, ForeignKey("challenges.id"), nullable=False)
+    item_id = Column(Integer, ForeignKey("challenge_items.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    answer_text = Column(Text)
+    is_correct = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (UniqueConstraint("item_id", "user_id", name="uq_challenge_item_user"),)

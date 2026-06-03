@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from .database import Base, engine
-from .routers import auth, invites, admin, student, lessons, quizzes, ai
+from .routers import auth, invites, admin, student, lessons, quizzes, ai, challenges, presence
 from .seed import seed
 
 load_dotenv()
@@ -35,3 +35,6 @@ app.include_router(student.router, prefix="/api")
 app.include_router(lessons.router, prefix="/api")
 app.include_router(quizzes.router, prefix="/api")
 app.include_router(ai.router, prefix="/api")
+app.include_router(challenges.router, prefix="/api")
+
+app.include_router(presence.router, prefix="/api")

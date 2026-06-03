@@ -2,10 +2,56 @@ import os
 import re
 import json
 import string
+from datetime import datetime, timezone
 from typing import Any
 from dotenv import load_dotenv
 
 load_dotenv()
+
+AI_STATUS_FILE = os.getenv("AI_STATUS_FILE", "/tmp/clube-do-ingles-ai-status.json")
+
+def _write_ai_status(provider: str, status: str, message: str = "", retry_after_seconds: int | None = None):
+    try:
+        payload = {
+            "provider": provider,
+            "status": status,
+            "message": str(message or "")[:1000],
+            "retry_after_seconds": retry_after_seconds,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with open(AI_STATUS_FILE, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+def _mark_ai_ok(provider: str):
+    _write_ai_status(provider, "ok", "IA respondendo normalmente.")
+
+def _extract_retry_after_seconds(message: str) -> int | None:
+    m = re.search(r"retry in ([0-9]+(?:\.[0-9]+)?)s", message or "", re.I)
+    if m:
+        try:
+            return int(float(m.group(1)))
+        except Exception:
+            return None
+    m = re.search(r"retryDelay['\"]?:\s*['\"]?([0-9]+)s", message or "", re.I)
+    if m:
+        try:
+            return int(m.group(1))
+        except Exception:
+            return None
+    return None
+
+def _is_quota_error(message: str) -> bool:
+    low = (message or "").lower()
+    return (
+        "resource_exhausted" in low
+        or "quota exceeded" in low
+        or "generate_content_free_tier_requests" in low
+        or "insufficient_quota" in low
+        or "rate limit" in low
+    )
+
 
 SAFE_TEACHER_PROMPT = """
 Você é a Luma, uma robô professora de inglês para crianças e adolescentes brasileiros.
@@ -25,7 +71,8 @@ Regras de segurança:
 - Use temas seguros: apresentação, idade, país, comida, escola, família, animais, hobbies, rotina, brincadeiras, matérias da escola, viagem.
 
 Regras pedagógicas:
-- Trate o aluno pelo primeiro nome sempre que possível.
+- Use o primeiro nome do aluno apenas quando iniciar conversa, mudar claramente de assunto, elogiar algo importante ou chamar atenção com carinho.
+- Não comece todas as respostas com o nome do aluno.
 - Uma pergunta por vez.
 - Use inglês simples.
 - Explique em português apenas quando for útil.
@@ -43,7 +90,7 @@ Responda SOMENTE JSON válido com:
   "feedback": "comentário curto e motivador em inglês",
   "correction": "forma melhor da frase do aluno ou null",
   "explanation_pt": "explicação curta em português",
-  "next_question": "próxima pergunta simples em inglês, chamando o aluno pelo nome",
+  "next_question": "próxima pergunta simples em inglês. Use o nome do aluno só quando mudar de assunto ou quando soar natural.",
   "mood": "happy|helping|excited|start",
   "topic": "name|age|country|likes|food|school|family|travel|routine|animals|hobbies|clarification|games|subjects|friends",
   "understood": true,
@@ -53,17 +100,17 @@ Responda SOMENTE JSON válido com:
 """.strip()
 
 CONVERSATION_FLOW = [
-    {"topic": "name", "question": "{name}, what is your name?", "hint": "Responda: My name is..."},
+    {"topic": "name", "question": "What is your name?", "hint": "Responda: My name is..."},
     {"topic": "age", "question": "{name}, how old are you?", "hint": "Responda: I am twelve years old."},
-    {"topic": "animals", "question": "{name}, do you have a pet?", "hint": "Responda: Yes, I have a dog."},
+    {"topic": "animals", "question": "Do you have a pet?", "hint": "Responda: Yes, I have a dog."},
     {"topic": "family", "question": "{name}, what is your brother's name?", "hint": "Responda: His name is..."},
-    {"topic": "food", "question": "{name}, what is your favorite food?", "hint": "Responda: My favorite food is pizza."},
-    {"topic": "school", "question": "{name}, do you like studying English?", "hint": "Responda: Yes, I like studying English."},
-    {"topic": "subjects", "question": "{name}, what is your favorite subject?", "hint": "Responda: My favorite subject is math."},
-    {"topic": "games", "question": "{name}, what do you like to play?", "hint": "Responda: I like to play soccer."},
-    {"topic": "hobbies", "question": "{name}, what do you like to do after school?", "hint": "Responda: I like to play games."},
-    {"topic": "routine", "question": "{name}, what do you do in the morning?", "hint": "Responda: I brush my teeth."},
-    {"topic": "travel", "question": "{name}, can you say one travel phrase?", "hint": "Responda: I need help. / Where is the bathroom?"},
+    {"topic": "food", "question": "What is your favorite food?", "hint": "Responda: My favorite food is pizza."},
+    {"topic": "school", "question": "Do you like studying English?", "hint": "Responda: Yes, I like studying English."},
+    {"topic": "subjects", "question": "What is your favorite subject?", "hint": "Responda: My favorite subject is math."},
+    {"topic": "games", "question": "What do you like to play?", "hint": "Responda: I like to play soccer."},
+    {"topic": "hobbies", "question": "What do you like to do after school?", "hint": "Responda: I like to play games."},
+    {"topic": "routine", "question": "What do you do in the morning?", "hint": "Responda: I brush my teeth."},
+    {"topic": "travel", "question": "Can you say one travel phrase?", "hint": "Responda: I need help. / Where is the bathroom?"},
 ]
 
 HELP_PATTERNS = [
@@ -246,13 +293,14 @@ def _build_user_payload(message: str, student_name: str, lesson_title: str | Non
             "question": _format_question(current["question"], name),
         },
         "recent_topics_to_avoid": sorted(_used_topics(history)),
+        "learning_profile_hint": "Observe o histórico: se o aluno acerta mais um tema, avance gradualmente. Se erra, faça uma pergunta mais simples no mesmo assunto. Não repita nome em toda frase.",
         "history": clean_history,
         "student_message": message,
         "is_start": message == "__START_CONVERSATION__",
         "is_help_request": _looks_like_help(message),
         "instruction": (
             "Responda como Luma. Seja curta. JSON válido apenas. "
-            "Chame o aluno pelo primeiro nome na próxima pergunta. "
+            "Use o nome do aluno apenas se for início de conversa, mudança de contexto ou soar natural. "
             "Se is_start=true, cumprimente e faça a pergunta sugerida. "
             "Se is_help_request=true, explique melhor a última pergunta e não avance de assunto. "
             "Não corrija só por pontuação ou letra maiúscula."
@@ -358,9 +406,9 @@ def _fallback_enabled() -> bool:
 def _temporary_failure(student_name: str, provider: str) -> dict:
     name = _student_name(student_name)
     return {
-        "feedback": f"{name}, I need one more second.",
+        "feedback": f"{name}, I need one more try.",
         "correction": None,
-        "explanation_pt": f"A Luma online ({provider}) demorou ou falhou. Tente enviar de novo em alguns segundos.",
+        "explanation_pt": f"A Luma online ({provider}) atingiu o limite temporário ou demorou para responder. Tente novamente em alguns segundos.",
         "next_question": f"{name}, can you send your sentence again?",
         "mood": "helping",
         "topic": "retry",
@@ -386,9 +434,15 @@ def generate_ai_response(
             result = _gemini_response(message, student_name, lesson_title, turn_index, history)
             result["source"] = "gemini"
             result["fallback"] = False
+            _mark_ai_ok("gemini")
             return result
         except Exception as exc:
-            print(f"[LUMA_GEMINI_ERROR] {type(exc).__name__}: {exc}", flush=True)
+            err_msg = f"{type(exc).__name__}: {exc}"
+            print(f"[LUMA_GEMINI_ERROR] {err_msg}", flush=True)
+            if _is_quota_error(err_msg):
+                _write_ai_status("gemini", "quota_exceeded", err_msg, _extract_retry_after_seconds(err_msg))
+            else:
+                _write_ai_status("gemini", "error", err_msg, _extract_retry_after_seconds(err_msg))
             if not _fallback_enabled():
                 return _temporary_failure(student_name, "gemini")
             result = _mock_response(message, student_name=student_name, turn_index=turn_index, history=history)
@@ -401,9 +455,15 @@ def generate_ai_response(
             result = _openai_response(message, student_name, lesson_title, turn_index, history)
             result["source"] = "openai"
             result["fallback"] = False
+            _mark_ai_ok("openai")
             return result
         except Exception as exc:
-            print(f"[LUMA_OPENAI_ERROR] {type(exc).__name__}: {exc}", flush=True)
+            err_msg = f"{type(exc).__name__}: {exc}"
+            print(f"[LUMA_OPENAI_ERROR] {err_msg}", flush=True)
+            if _is_quota_error(err_msg):
+                _write_ai_status("openai", "quota_exceeded", err_msg, _extract_retry_after_seconds(err_msg))
+            else:
+                _write_ai_status("openai", "error", err_msg, _extract_retry_after_seconds(err_msg))
             if not _fallback_enabled():
                 return _temporary_failure(student_name, "openai")
             result = _mock_response(message, student_name=student_name, turn_index=turn_index, history=history)

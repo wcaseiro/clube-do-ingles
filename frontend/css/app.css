@@ -957,3 +957,348 @@ hr { border:0; border-top:1px solid var(--line); margin:18px 0; }
     justify-self:start;
   }
 }
+
+
+/* =========================
+   v3.4 - IA mais limpa + alerta admin de cota
+   ========================= */
+
+.luma-header-v34{
+  display:grid;
+  grid-template-columns:auto 1fr minmax(260px, 360px);
+  align-items:center;
+  gap:28px;
+}
+
+.luma-header-v34 .luma-header-main h1{
+  margin:14px 0 18px;
+  font-size:clamp(34px, 5.2vw, 62px);
+  line-height:1.02;
+}
+
+.luma-header-v34 .speed-toggle{
+  margin-top:0;
+}
+
+.luma-header-v34 .ai-usage{
+  justify-self:end;
+}
+
+.luma-cta-card{
+  padding:28px;
+  overflow:hidden;
+  position:relative;
+}
+
+.luma-cta-card:before{
+  content:"";
+  position:absolute;
+  inset:auto -80px -120px auto;
+  width:260px;
+  height:260px;
+  border-radius:50%;
+  background:radial-gradient(circle,#a7f3d0,transparent 68%);
+  opacity:.7;
+}
+
+.luma-cta-grid{
+  display:grid;
+  grid-template-columns:1fr 170px;
+  gap:20px;
+  align-items:center;
+  position:relative;
+  z-index:1;
+}
+
+.luma-cta-kicker{
+  display:inline-flex;
+  padding:8px 13px;
+  border-radius:999px;
+  background:#dcfce7;
+  color:#166534;
+  font-weight:950;
+  margin-bottom:16px;
+}
+
+.luma-cta-title{
+  font-size:clamp(30px,4vw,50px);
+  font-weight:1000;
+  letter-spacing:-.04em;
+  color:#111827;
+  margin-bottom:10px;
+}
+
+.luma-cta-text{
+  color:#475569;
+  font-size:1.08rem;
+  line-height:1.5;
+  max-width:680px;
+}
+
+.luma-cta-avatar{
+  width:165px;
+  height:165px;
+  object-fit:cover;
+  border-radius:42px;
+  background:#fff;
+  box-shadow:0 22px 50px rgba(79,70,229,.18);
+}
+
+.admin-ai-status{
+  margin:18px 0;
+  border-radius:22px;
+  padding:18px 20px;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  border:1px solid #dbeafe;
+  background:#f8fafc;
+  box-shadow:0 12px 30px rgba(15,23,42,.06);
+}
+
+.admin-ai-status b{
+  font-size:1.05rem;
+}
+
+.admin-ai-status span{
+  color:#334155;
+  font-weight:800;
+}
+
+.admin-ai-status small{
+  color:#64748b;
+  line-height:1.45;
+}
+
+.admin-ai-status.ok{
+  background:#ecfdf3;
+  border-color:#86efac;
+}
+
+.admin-ai-status.warn{
+  background:#fff7ed;
+  border-color:#fdba74;
+}
+
+.admin-ai-status.danger{
+  background:#fef2f2;
+  border-color:#fca5a5;
+}
+
+@media (max-width: 900px){
+  .luma-header-v34{
+    grid-template-columns:1fr;
+    gap:18px;
+  }
+
+  .luma-header-v34 .ai-usage{
+    justify-self:stretch;
+  }
+
+  .luma-cta-grid{
+    grid-template-columns:1fr;
+  }
+
+  .luma-cta-avatar{
+    display:none;
+  }
+}
+
+
+/* =========================
+   v3.5 - Desafios aluno x aluno
+   ========================= */
+
+.login-hero-clean h1{
+  max-width:720px;
+}
+
+.challenge-hero{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:20px;
+  padding:28px;
+  border-radius:30px;
+  background:linear-gradient(135deg,#eef2ff,#ecfeff);
+  border:1px solid #dbeafe;
+  box-shadow:0 22px 60px rgba(79,70,229,.09);
+  margin-bottom:22px;
+}
+
+.challenge-hero h2{
+  font-size:clamp(30px,4vw,56px);
+  line-height:1;
+  margin:12px 0 8px;
+}
+
+.challenge-hero p{
+  color:#475569;
+  font-size:1.08rem;
+}
+
+.challenge-card{
+  display:grid;
+  grid-template-columns:1fr auto auto;
+  gap:14px;
+  align-items:center;
+  padding:16px;
+  border-radius:20px;
+  background:#fff;
+  border:1px solid #e5e7eb;
+}
+
+.challenge-card small{
+  display:block;
+  color:#64748b;
+  font-weight:800;
+  margin-top:4px;
+}
+
+.student-challenge-pick{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  width:100%;
+  text-align:left;
+  padding:18px;
+  border-radius:22px;
+  background:#fff;
+  border:1px solid #e5e7eb;
+  box-shadow:0 10px 24px rgba(15,23,42,.04);
+}
+
+.student-challenge-pick:hover{
+  border-color:#818cf8;
+  transform:translateY(-1px);
+}
+
+.student-challenge-pick small{
+  display:block;
+  color:#64748b;
+  margin-top:3px;
+}
+
+.challenge-progress{
+  margin-bottom:18px;
+}
+
+.challenge-grid{
+  gap:16px;
+}
+
+.challenge-item{
+  padding:20px;
+  border-radius:24px;
+  border:2px solid #e5e7eb;
+  background:#fff;
+  box-shadow:0 14px 32px rgba(15,23,42,.05);
+}
+
+.challenge-item.correct{
+  border-color:#86efac;
+  background:#ecfdf3;
+}
+
+.challenge-item.wrong{
+  border-color:#fca5a5;
+  background:#fef2f2;
+}
+
+.challenge-item-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:12px;
+}
+
+.challenge-item h3{
+  font-size:1.45rem;
+  margin:0 0 16px;
+}
+
+.challenge-answer-line{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+
+.challenge-answer-line input{
+  flex:1;
+  min-width:240px;
+  background:#fff;
+  border:1px solid #e5e7eb;
+  border-radius:18px;
+  padding:14px;
+}
+
+.challenge-answered{
+  background:#f8fafc;
+  border:1px solid #e5e7eb;
+  padding:12px 14px;
+  border-radius:16px;
+  color:#334155;
+}
+
+.challenge-summary{
+  padding:22px;
+  border-radius:26px;
+  background:linear-gradient(135deg,#fff7ed,#ecfdf3);
+  border:1px solid #fed7aa;
+  margin-bottom:18px;
+}
+
+.challenge-summary h2{
+  margin:0 0 8px;
+  font-size:2rem;
+}
+
+@media (max-width: 768px){
+  .challenge-hero,
+  .challenge-card{
+    grid-template-columns:1fr;
+    display:grid;
+  }
+}
+
+
+/* =========================
+   v3.6 - Presença online, aceite de desafio e relatórios admin
+   ========================= */
+
+.challenge-card.pending{
+  background:#fff7ed;
+  border-color:#fdba74;
+}
+
+.challenge-pending-panel{
+  border:2px solid #fdba74;
+  background:#fff7ed;
+}
+
+.admin-section-title input[type="date"]{
+  border:1px solid #e5e7eb;
+  border-radius:14px;
+  padding:10px 12px;
+  font-weight:800;
+}
+
+.bottom-nav{
+  max-width:min(980px, calc(100vw - 32px));
+}
+
+.bottom-nav button{
+  min-width:88px;
+}
+
+@media (max-width:768px){
+  .bottom-nav{
+    overflow-x:auto;
+    justify-content:flex-start;
+  }
+  .bottom-nav button{
+    min-width:76px;
+  }
+}

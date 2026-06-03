@@ -8,9 +8,19 @@ let currentSpeechRecognition = null;
 
 function protect(){ if(!store.token){ go('/'); return false; } return true; }
 function showNav(show=true){ nav.classList.toggle('hidden', !show); }
+let presenceTimer = null;
+function startPresenceHeartbeat(){
+  if(presenceTimer || !store.token) return;
+  const ping = () => api('/presence/heartbeat',{method:'POST',body:'{}'}).catch(()=>{});
+  ping();
+  presenceTimer = setInterval(ping, 60000);
+}
+function stopPresenceHeartbeat(){ if(presenceTimer){ clearInterval(presenceTimer); presenceTimer=null; } }
 function logo(){ return `<div class="logo"><img src="/assets/logo.svg" alt="Clube do Inglês"></div>`; }
 function card(content, extra=''){ return `<section class="card ${extra}">${content}</section>`; }
 function escapeHtml(s){ return String(s ?? '').replace(/[&<>'"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+function currentStudentName(){ const u=store.user||{}; return escapeHtml(u.first_name || u.nickname || 'explorer'); }
+function currentStudentNick(){ const u=store.user||{}; return escapeHtml(u.nickname || u.first_name || 'aluno'); }
 function getVoiceRate(){ return localStorage.getItem('voice_rate') === 'slow' ? 0.68 : 0.92; }
 function setVoiceRate(rate){ localStorage.setItem('voice_rate', rate); document.querySelectorAll('[data-rate]').forEach(b => b.classList.toggle('active', b.dataset.rate === rate)); toast(rate === 'slow' ? 'Velocidade lenta ativada.' : 'Velocidade normal ativada.', 'success'); }
 function speak(text, lang='en-US'){
@@ -147,6 +157,7 @@ function toggleTranslation(id){
 async function render(){
   const path = location.pathname;
   try {
+    if(store.token) startPresenceHeartbeat();
     if(path.startsWith('/convite/')) return renderInvite(path.split('/').pop());
     if(path === '/' || path === '/login') return renderLogin();
     if(path.startsWith('/admin')) return renderAdmin();
@@ -154,6 +165,9 @@ async function render(){
     if(path === '/app/trilha') return renderTrail();
     if(path.startsWith('/app/aula/')) return renderLesson(path.split('/').pop());
     if(path === '/app/ranking') return renderRanking();
+    if(path === '/app/desafio') return renderChallenge();
+    if(path === '/app/desafio/novo') return renderChallengeNew();
+    if(path.startsWith('/app/desafio/')) return renderChallengePlay(path.split('/').pop());
     if(path === '/app/perfil') return renderProfile();
     if(path === '/app/ia') return renderAI();
     return renderLogin();
@@ -166,14 +180,13 @@ async function render(){
 function renderLogin(){
   showNav(false);
   store.clear();
-  app.innerHTML = `<div class="hero">
-    <div>${logo()}<span class="badge">🌟 Web App/PWA</span><h1>Aprenda inglês conversando, jogando e evoluindo.</h1><p>Entre com o código da turma, nickname e senha. Sem e-mail, sem telefone e sem dados pessoais.</p></div>
+  app.innerHTML = `<div class="hero login-hero-clean">
+    <div>${logo()}<span class="badge">🌟 Clube do Inglês</span><h1>Aprenda inglês do seu jeito.</h1><p>Entre para continuar suas missões, conversas e desafios.</p></div>
     <section class="hero-card"><h2>Entrar no Clube</h2><form id="loginForm" class="form" autocomplete="off">
       <label>Código da turma</label><input name="class_code" inputmode="text" placeholder="Ex: HELENA2026" autocomplete="off" autocapitalize="characters" spellcheck="false" required>
       <label>Nickname</label><input name="nickname" placeholder="Seu nickname" autocomplete="off" autocapitalize="off" spellcheck="false" required>
       <label>Senha</label><input name="password" type="password" placeholder="Sua senha" autocomplete="new-password" required>
       <button class="btn">Entrar</button>
-      <p class="safe-note mini">Os campos não vêm mais preenchidos automaticamente pelo app. Se aparecerem preenchidos, é o gerenciador de senhas do navegador.</p>
     </form></section></div>`;
   document.getElementById('loginForm').onsubmit = async e => {
     e.preventDefault();
@@ -360,14 +373,19 @@ function renderRankingList(rows, empty='Sem pontuação ainda.'){
 
 async function renderRanking(){
   if(!protect()) return; showNav(true);
-  const [weekly, general, trail, conversation] = await Promise.all([
+  const [weekly, general, trail, conversation, challenge] = await Promise.all([
     api('/student/ranking?kind=weekly'),
     api('/student/ranking?kind=general'),
     api('/student/ranking?kind=trail').catch(()=>[]),
-    api('/student/ranking?kind=conversation').catch(()=>[])
+    api('/student/ranking?kind=conversation').catch(()=>[]),
+    api('/student/ranking?kind=challenge').catch(()=>[])
   ]);
 
-  app.innerHTML = `<div class="topbar"><div class="title"><h1>Ranking</h1><p>Competição saudável: trilha, conversação e evolução de avatar.</p></div></div>
+  app.innerHTML = `<div class="topbar"><div class="title"><h1>Ranking</h1><p>Competição saudável: trilha, conversação, desafios e evolução de avatar.</p></div></div>
+
+  ${card(`<h2>⚔️ Mais vitórias em desafios</h2>
+    <p class="muted">Vence quem acertar mais nas batalhas de 10 missões.</p>
+    <div class="grid">${renderRankingList(challenge, 'Sem desafios vencidos ainda.')}</div>`)}
 
   ${card(`<h2>🧭 Score por trilha</h2>
     <p class="muted">Pontuação das aulas, quizzes e desafios concluídos.</p>
@@ -384,6 +402,166 @@ async function renderRanking(){
       <b>Avatares evolutivos:</b> ao juntar XP, novos avatares são liberados automaticamente: 🤖 → 🛸 → 🚀 → 🦾 → 🌟 → 👑
     </div>`)}
   `;
+}
+
+
+function challengeTypeLabel(type){
+  return {
+    choose_correct:'Escolha a correta',
+    write_en:'Escreva em inglês',
+    speak_en:'Fale em inglês',
+    translate_pt_to_en:'Traduza para inglês',
+    translate_en_to_pt:'Traduza para português'
+  }[type] || type;
+}
+
+function challengeStatusLabel(c){
+  if(c.status === 'pending' && c.am_opponent) return '<span class="status-pill warn">Aguardando seu aceite</span>';
+  if(c.status === 'pending') return '<span class="status-pill warn">Convite enviado</span>';
+  if(c.status === 'declined') return '<span class="status-pill off">Recusado</span>';
+  if(c.status === 'completed'){
+    if(c.i_won === true) return '<span class="status-pill ok">Você venceu</span>';
+    if(c.i_won === false) return '<span class="status-pill off">Finalizado</span>';
+    return '<span class="status-pill warn">Empate</span>';
+  }
+  return '<span class="status-pill ok">Em andamento</span>';
+}
+
+async function renderChallenge(){
+  if(!protect()) return; showNav(true);
+  await api('/presence/heartbeat',{method:'POST',body:'{}'}).catch(()=>{});
+  const [list, ranking, pending] = await Promise.all([
+    api('/challenges').catch(()=>[]),
+    api('/challenges/ranking').catch(()=>[]),
+    api('/challenges/pending').catch(()=>[])
+  ]);
+
+  app.innerHTML = `<div class="topbar">
+    <div class="title"><h1>⚔️ Desafios</h1><p>Desafie quem está online e dispute 10 missões.</p></div>
+    <button class="btn" onclick="go('/app/desafio/novo')">Novo desafio</button>
+  </div>
+
+  ${pending.length ? card(`<h2>🔔 Desafios recebidos</h2>
+    <div class="grid">${pending.map(c=>`<div class="challenge-card pending">
+      <div><b>${escapeHtml(c.challenger?.nickname || 'Aluno')}</b><small>quer desafiar você agora</small></div>
+      <button class="btn success" onclick="acceptChallenge(${c.id}, true)">Aceitar</button>
+      <button class="btn secondary" onclick="acceptChallenge(${c.id}, false)">Recusar</button>
+    </div>`).join('')}</div>`, 'challenge-pending-panel') : ''}
+
+  <section class="challenge-hero">
+    <div>
+      <span class="badge">⚔️ Aluno x aluno</span>
+      <h2>Quem acerta mais?</h2>
+      <p>Escolha alguém online. Cada aluno pode enviar apenas 1 desafio por dia.</p>
+    </div>
+    <button class="btn" onclick="go('/app/desafio/novo')">🚀 Criar desafio</button>
+  </section>
+
+  ${card(`<h2>🏆 Ranking de vitórias</h2>
+    <div class="grid">${ranking.map(r=>`<div class="ranking-row ranking-row-evo">
+      <b>#${r.position}</b>
+      <span class="ranking-player"><span class="ranking-avatar">${r.avatar||'⭐'}</span><span><b>${escapeHtml(r.nickname)}</b><small>${r.online?'🟢 online':'⚪ offline'} · ${r.wins} vitória(s)</small></span></span>
+      <b>${r.wins}</b>
+    </div>`).join('') || '<p>Sem vitórias ainda.</p>'}</div>`)}
+
+  ${card(`<h2>Meus desafios</h2>
+    <div class="grid">${list.map(c=>`<div class="challenge-card">
+      <div><b>${escapeHtml(c.other_player?.nickname || 'Aluno')}</b><small>${c.other_player?.online?'🟢 online':'⚪ offline'} · ${c.my_score} x ${c.other_score}</small></div>
+      ${challengeStatusLabel(c)}
+      ${c.status==='pending' && c.am_opponent ? `<button class="btn success" onclick="acceptChallenge(${c.id}, true)">Aceitar</button>` : `<button class="btn secondary" onclick="go('/app/desafio/${c.id}')">${c.status==='completed'?'Ver resumo':c.status==='pending'?'Aguardar':'Continuar'}</button>`}
+    </div>`).join('') || '<p>Nenhum desafio ainda. Crie o primeiro!</p>'}</div>`)}
+  `;
+}
+
+async function acceptChallenge(id, accept){
+  const c = await api(`/challenges/${id}/accept`, {method:'POST', body:JSON.stringify({accept})});
+  toast(accept ? 'Desafio aceito!' : 'Desafio recusado.', accept ? 'success' : 'warn');
+  if(accept) go(`/app/desafio/${id}`);
+  else renderChallenge();
+}
+
+async function renderChallengeNew(){
+  if(!protect()) return; showNav(true);
+  await api('/presence/heartbeat',{method:'POST',body:'{}'}).catch(()=>{});
+  const students = await api('/challenges/students?online_only=true');
+  app.innerHTML = `<div class="topbar">
+    <div class="title"><h1>Novo desafio</h1><p>Escolha um aluno online da sua turma.</p></div>
+    <button class="btn secondary" onclick="go('/app/desafio')">Voltar</button>
+  </div>
+  ${card(`<h2>Quem está online?</h2>
+    <div class="grid">${students.map(s=>`<button class="student-challenge-pick" onclick="createChallenge(${s.id})">
+      <span class="ranking-avatar">${s.avatar||'⭐'}</span>
+      <span><b>${escapeHtml(s.nickname)}</b><small>🟢 online · ${s.total_xp||0} XP</small></span>
+    </button>`).join('') || '<p>Nenhum outro aluno online agora. Tente mais tarde.</p>'}</div>`)}
+  `;
+}
+
+async function createChallenge(opponentId){
+  const c = await api('/challenges',{method:'POST', body:JSON.stringify({opponent_id: opponentId})});
+  toast('Convite de desafio enviado!', 'success');
+  go(`/app/desafio/${c.id}`);
+}
+
+function renderChallengeItem(challenge, item){
+  const disabled = item.answered || challenge.status !== 'active' ? 'disabled' : '';
+  const status = item.answered ? (item.is_correct ? '<span class="status-pill ok">Acertou</span>' : '<span class="status-pill off">Errou</span>') : '';
+  const options = item.options ? `<div class="options">${Object.entries(item.options).map(([k,v])=>`<button ${disabled} class="option" onclick="submitChallengeAnswer(${challenge.id}, ${item.id}, '${k}')"><b>${k}</b> ${escapeHtml(v)}</button>`).join('')}</div>` : '';
+  const input = !item.options && !item.answered && challenge.status === 'active' ? `<div class="challenge-answer-line">
+      <input id="challenge-answer-${item.id}" class="ai-input" placeholder="Sua resposta...">
+      ${item.type==='speak_en'?`<button class="btn secondary" onclick="startSpeechToInput('challenge-answer-${item.id}', ()=>submitChallengeAnswer(${challenge.id}, ${item.id}))">🎙️ Falar</button>`:''}
+      <button class="btn" onclick="submitChallengeAnswer(${challenge.id}, ${item.id})">Responder</button>
+    </div>` : '';
+  const answered = item.answered && !item.options ? `<div class="challenge-answered"><b>Sua resposta:</b> ${escapeHtml(item.answer_text||'')}</div>` : '';
+  return `<div class="challenge-item ${item.answered ? (item.is_correct?'correct':'wrong') : ''}">
+    <div class="challenge-item-head"><span class="badge">#${item.order_index} · ${challengeTypeLabel(item.type)}</span>${status}</div>
+    <h3>${escapeHtml(item.prompt)}</h3>
+    ${options}
+    ${input}
+    ${answered}
+  </div>`;
+}
+
+async function renderChallengePlay(id){
+  if(!protect()) return; showNav(true);
+  await api('/presence/heartbeat',{method:'POST',body:'{}'}).catch(()=>{});
+  const c = await api(`/challenges/${id}`);
+  const answered = c.items.filter(i=>i.answered).length;
+  const total = c.items.length || 10;
+
+  if(c.status === 'pending'){
+    app.innerHTML = `<div class="topbar"><div class="title"><h1>⚔️ Desafio pendente</h1><p>Contra ${escapeHtml(c.other_player?.nickname || 'aluno')}</p></div><button class="btn secondary" onclick="go('/app/desafio')">Voltar</button></div>
+    ${card(c.am_opponent ? `<h2>Você recebeu um desafio!</h2><p>${escapeHtml(c.challenger?.nickname || 'Aluno')} quer jogar contra você.</p><button class="btn success" onclick="acceptChallenge(${c.id}, true)">Aceitar desafio</button> <button class="btn secondary" onclick="acceptChallenge(${c.id}, false)">Recusar</button>` : `<h2>Convite enviado</h2><p>Aguardando ${escapeHtml(c.opponent?.nickname || 'aluno')} aceitar.</p>`)}
+    `;
+    return;
+  }
+
+  app.innerHTML = `<div class="topbar">
+    <div class="title"><h1>⚔️ Desafio contra ${escapeHtml(c.other_player?.nickname || 'aluno')}</h1><p>${c.my_score} x ${c.other_score} · ${answered}/${total} respondidas</p></div>
+    <button class="btn secondary" onclick="go('/app/desafio')">Voltar</button>
+  </div>
+  <div class="progress challenge-progress"><div style="width:${Math.round(answered/Math.max(total,1)*100)}%"></div></div>
+  ${c.status==='completed' ? renderChallengeSummary(c) : ''}
+  <div class="grid challenge-grid">${c.items.map(item=>renderChallengeItem(c,item)).join('')}</div>`;
+}
+
+function renderChallengeSummary(c){
+  const result = c.i_won === true ? '🎉 Você venceu!' : c.i_won === false ? '😅 Você não venceu desta vez.' : '🤝 Empate!';
+  const right = c.items.filter(i=>i.answered && i.is_correct).length;
+  const wrong = c.items.filter(i=>i.answered && !i.is_correct).length;
+  return `<section class="challenge-summary">
+    <h2>${result}</h2>
+    <p>Você acertou <b>${right}</b> e errou <b>${wrong}</b>. Placar final: <b>${c.my_score} x ${c.other_score}</b>.</p>
+  </section>`;
+}
+
+async function submitChallengeAnswer(challengeId, itemId, forcedAnswer=null){
+  const input = document.getElementById(`challenge-answer-${itemId}`);
+  const answer = forcedAnswer || input?.value?.trim() || '';
+  if(!answer){ toast('Digite ou fale sua resposta.', 'warn'); return; }
+  const r = await api(`/challenges/${challengeId}/answers`, {method:'POST', body:JSON.stringify({item_id:itemId, answer_text:answer})});
+  if(r.correct){ rewardSound(); toast('Resposta correta!', 'success'); }
+  else { correctionSound(); toast(`Quase! Resposta esperada: ${r.expected_answer}`, 'warn'); }
+  renderChallengePlay(challengeId);
 }
 
 async function renderProfile(){
@@ -542,21 +720,17 @@ function renderLumaCard(resp, originalText=''){
 function renderLumaStartCard(){
   return `
     <div class="ai-row luma">
-      <div class="luma-card start">
-        <div class="luma-head">
-          <div class="luma-head-left">
-            <img src="/assets/luma-avatar.png" class="luma-avatar-mini" alt="Luma">
-            <div>
-              <div class="luma-name">Luma</div>
-              <div class="luma-subtitle">Professora de inglês</div>
+      <div class="luma-card start luma-cta-card">
+        <div class="luma-cta-grid">
+          <div>
+            <div class="luma-cta-kicker">🚀 Missão de conversação</div>
+            <div class="luma-cta-title">Vamos praticar inglês?</div>
+            <div class="luma-cta-text">A Luma vai conversar com você em inglês, corrigir quando precisar e mudar os temas com o tempo.</div>
+            <div class="luma-actions">
+              <button id="startLumaBtn" class="btn luma-start-btn">🚀 Vamos conversar</button>
             </div>
           </div>
-          <div class="luma-badge start">✨ pronta</div>
-        </div>
-        <div class="luma-feedback">Vamos praticar inglês juntos?</div>
-        <div class="luma-tip">Clique em <b>Vamos conversar</b>. Eu vou me apresentar e começar uma conversa no seu ritmo.</div>
-        <div class="luma-actions">
-          <button id="startLumaBtn" class="btn luma-start-btn">🚀 Vamos conversar</button>
+          <img src="/assets/luma-avatar.png" class="luma-cta-avatar" alt="Luma">
         </div>
       </div>
     </div>
@@ -605,7 +779,7 @@ function renderAIComposer(){
     </div>
 
     <div class="ai-helper">
-      🎤 Ao falar, faça a frase completa. A Luma espera uma pausa maior antes de enviar.
+      🎤 Fale a frase completa.
     </div>
 
     <button id="voiceAnswerBtn" class="ai-mic-fab" type="button" aria-label="Falar com a Luma">
@@ -629,26 +803,24 @@ async function renderAI(){
   const micWarn = micUnavailableMessage();
   const currentRate = localStorage.getItem('voice_rate') || 'normal';
   const usage = await loadAIUsage();
+  const nick = currentStudentNick();
 
   app.innerHTML = `
     <div class="ai-page ai-page-clean">
-      <section class="luma-header luma-header-clean">
+      <section class="luma-header luma-header-clean luma-header-v34">
         <img class="robot-avatar-img big-luma" src="/assets/luma-avatar.png" alt="Luma, robô professora">
-        <div>
-          <div class="luma-header-top">
-            <span class="badge">🤖 Luma · professora de inglês</span>
-            ${renderAIUsage(usage)}
-          </div>
-          <h1>Fale inglês comigo!</h1>
-          <p>Converse sobre assuntos do dia a dia. Eu vou lembrar do que já falamos e mudar os temas com o tempo.</p>
+        <div class="luma-header-main">
+          <span class="badge">🤖 Luma · professora de inglês</span>
+          <h1>Oi, ${nick}. Converse em inglês comigo!</h1>
           <div class="speed-toggle">
             <button class="btn secondary ${currentRate==='normal'?'active':''}" data-rate="normal" onclick="setVoiceRate('normal')">⚡ Normal</button>
             <button class="btn secondary ${currentRate==='slow'?'active':''}" data-rate="slow" onclick="setVoiceRate('slow')">🐢 Mais lento</button>
           </div>
         </div>
+        ${renderAIUsage(usage)}
       </section>
 
-      ${micWarn ? `<div class="safe-note">🎙️ ${escapeHtml(micWarn)}</div>` : `<div class="voice-ready">🎙️ Microfone pronto. Toque no botão laranja e fale a frase completa.</div>`}
+      ${micWarn ? `<div class="safe-note">🎙️ ${escapeHtml(micWarn)}</div>` : ''}
 
       <section class="ai-stage">
         <div id="chat" class="ai-chat">
@@ -764,6 +936,49 @@ async function sendChat(){
   speak(spoken, 'en-US');
 }
 
+
+function renderAdminAIStatus(status){
+  if(!status) return '';
+  const st = String(status.status || 'unknown');
+  const provider = escapeHtml(status.provider || status.provider_configured || 'ia');
+  if(st === 'ok'){
+    return `<div class="admin-ai-status ok"><b>✅ IA online</b><span>${provider} respondendo normalmente.</span></div>`;
+  }
+  if(st === 'quota_exceeded'){
+    const retry = status.retry_after_seconds ? ` Tente novamente em cerca de ${status.retry_after_seconds}s.` : '';
+    return `<div class="admin-ai-status danger"><b>⚠️ Cota da IA excedida</b><span>${provider} atingiu o limite de requisições. ${retry}</span><small>O app não está quebrado; é limite do provider. Verifique billing/limites do Gemini ou aguarde a liberação.</small></div>`;
+  }
+  if(st === 'error'){
+    return `<div class="admin-ai-status warn"><b>⚠️ IA com erro</b><span>${provider}: ${escapeHtml(status.message || 'erro não identificado')}</span></div>`;
+  }
+  return `<div class="admin-ai-status warn"><b>ℹ️ IA sem status recente</b><span>${provider}: ainda não houve uma chamada registrada desde o último restart.</span></div>`;
+}
+
+
+async function renderAdminReports(){
+  const date = document.getElementById('reportDate')?.value || new Date().toISOString().slice(0,10);
+  const r = await api(`/admin/reports/daily?date=${encodeURIComponent(date)}`);
+  const box = document.getElementById('adminReportsBox');
+  if(!box) return;
+  box.innerHTML = `<div class="grid cols-4">
+    ${card(`<b>${r.totals.ai_messages}</b><p>Mensagens IA</p>`)}
+    ${card(`<b>${r.totals.estimated_conversation_minutes}</b><p>Min. conversa</p>`)}
+    ${card(`<b>${r.totals.challenge_answers}</b><p>Respostas desafio</p>`)}
+    ${card(`<b>${r.totals.xp_today}</b><p>XP do dia</p>`)}
+  </div>
+  <table class="table admin-table">
+    <thead><tr><th>Aluno</th><th>Status</th><th>IA</th><th>Tempo</th><th>Desafios</th><th>XP</th></tr></thead>
+    <tbody>${r.students.map(s=>`<tr>
+      <td>${s.avatar||'⭐'} <b>${escapeHtml(s.nickname)}</b><br><small>${escapeHtml(s.first_name)}</small></td>
+      <td>${s.online?'<span class="status-pill ok">Online</span>':'<span class="status-pill off">Offline</span>'}</td>
+      <td>${s.ai_messages}</td>
+      <td>${s.estimated_conversation_minutes} min</td>
+      <td>${s.challenge_correct}/${s.challenge_answers} · ${s.challenges_won} vitória(s)</td>
+      <td>${s.xp_today}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
 async function renderAdmin(){
   if(!protect()) return;
   showNav(false);
@@ -783,8 +998,10 @@ async function renderAdmin(){
     <button class="btn ghost" onclick="logout()">Sair</button>
   </div>
 
+  ${renderAdminAIStatus(d.ai_status)}
+
   <div class="grid cols-3">
-    ${card(`<b>${d.students}</b><p>Alunos ativos</p>`)}
+    ${card(`<b>${d.students}</b><p>Alunos ativos</p>`) }
     ${card(`<b>${d.classes}</b><p>Turmas ativas</p>`)}
     ${card(`<b>${d.xp_total}</b><p>XP gerado</p>`)}
   </div>
@@ -898,5 +1115,5 @@ async function adminToggleStudent(id, isActive){
   renderAdmin();
 }
 
-function logout(){ store.clear(); go('/'); }
+function logout(){ stopPresenceHeartbeat(); store.clear(); go('/'); }
 render();

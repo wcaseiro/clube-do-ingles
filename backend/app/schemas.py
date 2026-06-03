@@ -96,3 +96,15 @@ class AIStartResponse(BaseModel):
     needs_repeat: bool | None = None
     source: str | None = None
     fallback: bool | None = None
+
+
+class ChallengeCreate(BaseModel):
+    opponent_id: int
+
+class ChallengeSubmitAnswer(BaseModel):
+    item_id: int
+    answer_text: str = Field(default="", max_length=1000)
+
+
+class ChallengeAccept(BaseModel):
+    accept: bool = True

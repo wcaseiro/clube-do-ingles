@@ -5,11 +5,8 @@ const store = {
   set token(v){ localStorage.setItem('token', v); },
   clear(){ localStorage.removeItem('token'); localStorage.removeItem('user'); },
   get user(){
-    try {
-      return JSON.parse(localStorage.getItem('user') || 'null');
-    } catch {
-      return null;
-    }
+    try { return JSON.parse(localStorage.getItem('user') || 'null'); }
+    catch { return null; }
   },
   set user(v){ localStorage.setItem('user', JSON.stringify(v)); }
 };
@@ -30,11 +27,8 @@ async function api(path, options = {}){
   const text = await res.text();
   let data = null;
 
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = text;
-  }
+  try { data = text ? JSON.parse(text) : null; }
+  catch { data = text; }
 
   if(!res.ok){
     throw new Error(data?.detail || data?.message || 'Erro na requisição');
@@ -45,19 +39,13 @@ async function api(path, options = {}){
 
 function toast(msg, type='info'){
   const el = document.getElementById('toast');
-
-  if(!el){
-    alert(msg);
-    return;
-  }
+  if(!el){ alert(msg); return; }
 
   el.textContent = msg;
   el.className = `toast ${type}`;
   el.classList.remove('hidden');
 
-  setTimeout(() => {
-    el.classList.add('hidden');
-  }, 3800);
+  setTimeout(() => el.classList.add('hidden'), 3800);
 }
 
 function go(path){
